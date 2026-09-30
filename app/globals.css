@@ -1,0 +1,352 @@
+@import "tailwindcss";
+
+/*
+ * Night Kitchen palette — see DESIGN.md.
+ *
+ * `tile` (surface) and `char` (ink) deliberately swap between themes: the
+ * palette is used semantically everywhere, so inverting those two carries most
+ * of the UI on its own. Dark mode is the design note's "night kitchen" —
+ * Char background, Tile ink, same accents.
+ *
+ * Three tokens never move, because they sit on top of constant colors:
+ *   surface — card/input background (the only one that isn't a simple inverse)
+ *   scrim   — always-dark overlays that float above photos
+ *   chalk   — always-light text on scrims and on flame/herb/yolk accents
+ */
+/*
+ * Theming has three axes, each an attribute on <html> (see lib/theme.ts):
+ *   data-mode  = light | dark
+ *   data-theme = kitchen | mint | dusk   (brand family; also sets --brand)
+ *   data-style = standard | flooded
+ * `accent-ink` is the text/icon colour that sits on the brand accent — chalk
+ * for most, but dark on bright themes (Mint) where white is illegible.
+ * Constant tokens (scrim, chalk) live in @theme. Flooded palettes are DERIVED
+ * from --brand via color-mix, so a brand only hand-authors its standard values.
+ */
+
+/* Fallback = Night Kitchen standard light, in case attributes are ever absent. */
+:root {
+  --tile: #f2f1ec;
+  --char: #191512;
+  --smoke: #8b857c;
+  --flame: #e8430f;
+  --yolk: #ffc53d;
+  --herb: #42794f;
+  --surface: #ffffff;
+  --accent-ink: #f4f1ec;
+  --shimmer-sheen: rgba(255, 255, 255, 0.6);
+}
+
+/* Brand hue per theme — only the flooded style reads it. */
+:root[data-theme="kitchen"] { --brand: #e8430f; }
+:root[data-theme="mint"]    { --brand: #00c244; }
+:root[data-theme="dusk"]    { --brand: #4f5bd5; }
+
+/* ---- STANDARD palettes (neutral surface + brand accents) ---- */
+:root[data-theme="kitchen"][data-style="standard"][data-mode="light"] {
+  --tile: #f2f1ec; --char: #191512; --smoke: #8b857c; --surface: #ffffff;
+  --flame: #e8430f; --yolk: #ffc53d; --herb: #42794f; --accent-ink: #f4f1ec;
+  --shimmer-sheen: rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="kitchen"][data-style="standard"][data-mode="dark"] {
+  --tile: #16120f; --char: #f0ece5; --smoke: #a09890; --surface: #211b16;
+  --flame: #ff5a2b; --yolk: #ffc53d; --herb: #63a373; --accent-ink: #f4f1ec;
+  --shimmer-sheen: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="mint"][data-style="standard"][data-mode="light"] {
+  --tile: #f6f8f6; --char: #0b100d; --smoke: #6b776f; --surface: #ffffff;
+  --flame: #00c244; --yolk: #d8f5df; --herb: #0f7a3d; --accent-ink: #07130b;
+  --shimmer-sheen: rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="mint"][data-style="standard"][data-mode="dark"] {
+  --tile: #0b0e0c; --char: #eef3ef; --smoke: #8a968e; --surface: #161a17;
+  --flame: #00d94d; --yolk: #173a26; --herb: #39c26e; --accent-ink: #06120a;
+  --shimmer-sheen: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="dusk"][data-style="standard"][data-mode="light"] {
+  --tile: #f3f4fa; --char: #14161f; --smoke: #757a8a; --surface: #ffffff;
+  --flame: #4f5bd5; --yolk: #ffcf5c; --herb: #3a8f6f; --accent-ink: #f5f6ff;
+  --shimmer-sheen: rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="dusk"][data-style="standard"][data-mode="dark"] {
+  --tile: #111320; --char: #e9eaf2; --smoke: #9498ab; --surface: #1c1f2e;
+  --flame: #6b74ff; --yolk: #ffcf5c; --herb: #5aa588; --accent-ink: #0a0c16;
+  --shimmer-sheen: rgba(255, 255, 255, 0.07);
+}
+
+/* ---- FLOODED palettes (brand IS the surface), derived from --brand ---- */
+:root[data-style="flooded"][data-mode="light"] {
+  --tile: var(--brand);
+  --char: color-mix(in srgb, var(--brand) 8%, black);
+  --smoke: color-mix(in srgb, var(--char) 82%, var(--brand));
+  --surface: color-mix(in srgb, var(--brand) 74%, white);
+  --flame: color-mix(in srgb, var(--brand) 8%, black);
+  --accent-ink: color-mix(in srgb, var(--brand) 10%, white);
+  --yolk: color-mix(in srgb, var(--brand) 46%, white);
+  --herb: color-mix(in srgb, var(--brand) 22%, black);
+  --shimmer-sheen: rgba(255, 255, 255, 0.25);
+}
+:root[data-style="flooded"][data-mode="dark"] {
+  --tile: color-mix(in srgb, var(--brand) 34%, black);
+  --char: color-mix(in srgb, var(--brand) 10%, white);
+  --smoke: color-mix(in srgb, var(--char) 62%, var(--tile));
+  --surface: color-mix(in srgb, var(--tile) 87%, white);
+  --flame: var(--brand);
+  --accent-ink: color-mix(in srgb, var(--brand) 24%, black);
+  --yolk: color-mix(in srgb, var(--brand) 30%, black);
+  --herb: color-mix(in srgb, var(--brand) 35%, white);
+  --shimmer-sheen: rgba(255, 255, 255, 0.08);
+}
+
+@theme inline {
+  --color-tile: var(--tile);
+  --color-char: var(--char);
+  --color-smoke: var(--smoke);
+  --color-flame: var(--flame);
+  --color-yolk: var(--yolk);
+  --color-herb: var(--herb);
+  --color-surface: var(--surface);
+  --color-accent-ink: var(--accent-ink);
+
+  /* constant across every theme */
+  --color-scrim: #0d0a08;
+  --color-chalk: #f4f1ec;
+
+  --font-display: var(--font-bricolage);
+  --font-body: var(--font-instrument);
+  --font-hand: var(--font-caveat);
+
+  --radius-card: 14px;
+  --radius-chip: 8px;
+}
+
+/* Native form controls, scrollbars, and the like follow the mode */
+:root { color-scheme: light; }
+:root[data-mode="dark"] { color-scheme: dark; }
+
+html {
+  background: var(--color-tile);
+}
+
+body {
+  background: var(--color-tile);
+  color: var(--color-char);
+  font-family: var(--font-body), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+::selection {
+  background: var(--color-yolk);
+}
+
+/* Skeleton pulse for capturing cards */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.capture-pulse {
+  animation: soft-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capture-pulse {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* Hide scrollbars on horizontal chip rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* Skeleton shimmer — transform-only so it stays on the compositor at 60fps */
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--shimmer-sheen), transparent);
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer::after { animation: none; }
+}
+
+/* Skeleton entrance. CSS rather than a JS mount animation so it can't be
+   skipped, with `backwards` fill so the delay holds it hidden but the element
+   reverts to its own opacity afterwards (letting the exit fade run). */
+@keyframes skeleton-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.skeleton-enter {
+  animation: skeleton-in 250ms ease 150ms backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-enter { animation-duration: 1ms; animation-delay: 150ms; }
+}
+
+/* ---------------------------------------------------------------------------
+   Cold-start splash. Pure CSS: it animates from the raw SSR HTML, before any
+   JS has run — which is the whole window it exists to cover. Always char, in
+   both themes: it's the night in Night Kitchen.
+
+   The idle loops are full sine-like cycles that start AND end at identity, so
+   they hand off seamlessly from the entrance and never visibly restart. Each
+   runs on its own period, so the combined drift doesn't repeat for minutes.
+--------------------------------------------------------------------------- */
+#nk-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #191512;
+  cursor: default;
+}
+#nk-splash.nk-splash-out {
+  opacity: 0;
+  transform: scale(1.06);
+  transition: opacity 0.45s ease, transform 0.45s ease;
+  pointer-events: none;
+}
+
+.nk-sp-mark {
+  width: 9.5rem;
+  height: 9.5rem;
+}
+.nk-sp-mark g {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+/* Entrance: the bowl swings up… (units are viewBox units) */
+@keyframes nk-e-bowl {
+  0%   { transform: translateY(150px) scale(0.5); opacity: 0; }
+  55%  { transform: translateY(-12px) scale(1.06); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.nk-e-bowl { animation: nk-e-bowl 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.05s backwards; }
+
+/* …then the crescent climbs out of it, tumbling upright. */
+@keyframes nk-e-moon {
+  0%   { transform: translateY(160px) rotate(-70deg) scale(0.4); opacity: 0; }
+  60%  { transform: translateY(-14px) rotate(9deg) scale(1.07); opacity: 1; }
+  100% { transform: translateY(0) rotate(0deg) scale(1); opacity: 1; }
+}
+.nk-e-moon { animation: nk-e-moon 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.32s backwards; }
+
+/* Idle: the moon rides slow water… */
+@keyframes nk-i-bob {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(-13px); }
+  75%  { transform: translateY(9px); }
+  100% { transform: translateY(0); }
+}
+.nk-i-bob { animation: nk-i-bob 2.7s ease-in-out 1.22s infinite; }
+
+/* …rocking like a little boat… */
+@keyframes nk-i-rock {
+  0%   { transform: rotate(0deg); }
+  28%  { transform: rotate(-9deg); }
+  72%  { transform: rotate(8deg); }
+  100% { transform: rotate(0deg); }
+}
+.nk-i-rock { animation: nk-i-rock 3.7s ease-in-out 1.22s infinite; }
+
+/* …while the bowl sways in counterphase beneath it… */
+@keyframes nk-i-sway {
+  0%   { transform: rotate(0deg) translateY(0); }
+  30%  { transform: rotate(3.2deg) translateY(3px); }
+  75%  { transform: rotate(-2.8deg) translateY(-2px); }
+  100% { transform: rotate(0deg) translateY(0); }
+}
+.nk-i-sway { animation: nk-i-sway 3.1s ease-in-out 0.75s infinite; }
+
+/* …and everything breathes, barely. */
+@keyframes nk-i-breathe {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.035); }
+  100% { transform: scale(1); }
+}
+.nk-i-breathe { animation: nk-i-breathe 4.2s ease-in-out 0.75s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nk-e-bowl, .nk-e-moon { animation-duration: 1ms; animation-delay: 0ms; }
+  .nk-i-bob, .nk-i-rock, .nk-i-sway, .nk-i-breathe { animation: none; }
+  #nk-splash.nk-splash-out { transition-duration: 0.2s; transform: none; }
+}
+
+/*
+ * Portrait lock. The manifest's `orientation` covers installed Android, but
+ * iOS Safari ignores it and exposes no orientation-lock API, so a phone turned
+ * sideways has to be blocked in CSS.
+ *
+ * The max-height guard is what keeps this off desktop: any browser window
+ * wider than it is tall matches `orientation: landscape`, so without it a
+ * laptop would get the rotate screen too. 500px clears every phone in
+ * landscape and no laptop.
+ */
+.rotate-notice { display: none; }
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .rotate-notice {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1.5rem;
+    text-align: center;
+    background: var(--color-tile);
+    color: var(--color-char);
+  }
+  /* The app keeps running underneath — this only covers it, so nothing is
+     unmounted and scroll position survives the rotation back. */
+}
+
+/*
+ * Placeholder spinner for recipe photos, shown until the image has decoded.
+ * Sits behind the image rather than being swapped out, so there's no reflow
+ * at the handover — the photo just fades in over it.
+ *
+ * Needs a `relative` ancestor: every image slot provides one.
+ */
+@keyframes nk-spin {
+  to { transform: rotate(360deg); }
+}
+.nk-img-spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  height: 16px;
+  width: 16px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-char);
+  border-right-color: transparent;
+  opacity: 0.18;
+  animation: nk-spin 0.75s linear infinite;
+}
+
+/* Still a "something is coming" marker, just not a moving one. */
+@media (prefers-reduced-motion: reduce) {
+  .nk-img-spinner {
+    animation: none;
+    border-right-color: var(--color-char);
+    opacity: 0.12;
+  }
+}

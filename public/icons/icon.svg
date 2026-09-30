@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<rect width="512" height="512" fill="#191512"/>
+<g transform="translate(256 250) scale(1) translate(-256 -250)">
+  <g transform="rotate(-15 258 190)">
+    <mask id="crescent">
+      <rect width="512" height="512" fill="#fff"/>
+      <circle cx="292" cy="172" r="64" fill="#000"/>
+    </mask>
+    <circle cx="258" cy="190" r="74" fill="#ffc53d" mask="url(#crescent)"/>
+  </g>
+  <path d="M118 300h276a138 138 0 0 1-276 0z" fill="#e8430f"/>
+</g>
+</svg>
