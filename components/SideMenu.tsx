@@ -51,6 +51,7 @@ function MoonIcon() {
 
 const LINKS = [
   { href: "/", label: "Library", hint: "Everything you've saved" },
+  { href: "/make", label: "Make", hint: "Tell it what you want" },
   { href: "/plan", label: "Plan", hint: "The week ahead" },
   { href: "/grocery", label: "Grocery List", hint: "The running list" },
   { href: "/staples", label: "Staples", hint: "What you always keep in" },

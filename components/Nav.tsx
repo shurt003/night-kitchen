@@ -100,7 +100,7 @@ export function Nav() {
   const groceryActive = pathname.startsWith("/grocery");
 
   // Tabs are sized to their own label rather than equal slices: with labels as
-  // uneven as "Plan" and "Grocery List", equal slices centre each one in its own
+  // uneven as "Make" and "Grocery List", equal slices centre each one in its own
   // box and the gaps between the words come out visibly lopsided.
   const tab = (
     href: string,
@@ -174,7 +174,8 @@ export function Nav() {
               window.dispatchEvent(new CustomEvent("library-tab-tapped"));
             }
           )}
-          {tab("/plan", "Plan", pathname.startsWith("/plan"))}
+          {/* Plan moved to the side menu to make room for Make. */}
+          {tab("/make", "Make", pathname.startsWith("/make"))}
           {tab("/pantry", "Wing it", pathname.startsWith("/pantry"))}
           <div className="relative flex shrink-0">
             {tab("/grocery", "Grocery List", groceryActive, {
