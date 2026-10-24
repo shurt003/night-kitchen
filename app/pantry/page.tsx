@@ -9,6 +9,8 @@ import { springSoft, springUI } from "@/lib/springs";
 import { RecipeImage } from "@/components/RecipeImage";
 import { RecipeDetail } from "@/components/RecipeDetail";
 import { Spinner } from "@/components/Spinner";
+import { CyclingLine } from "@/components/CyclingLine";
+import { draftRecipe } from "@/lib/draftRecipe";
 import { INVENT_CACHE_KEY, INVENT_SESSION_KEY } from "@/lib/userCache";
 
 type Result = {
@@ -131,85 +133,6 @@ const THINKING_LINES = [
   "Almost there…",
   "Narrowing it to three…",
 ];
-
-/**
- * Cycles a line so a wait has a pulse to it. Fixed height and one absolutely
- * positioned line: the copy swaps without anything resizing under it, and
- * nothing can wrap onto a second.
- */
-function CyclingLine({
-  lines,
-  start = 0,
-  className,
-}: {
-  lines: readonly string[];
-  /** The button wants to open on its first line; the modal would rather not. */
-  start?: number;
-  className: string;
-}) {
-  const [i, setI] = useState(start);
-
-  useEffect(() => {
-    const t = setInterval(() => setI((n) => (n + 1) % lines.length), 2400);
-    return () => clearInterval(t);
-  }, [lines.length]);
-
-  return (
-    <span className={`relative block ${className}`}>
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.span
-          key={i}
-          initial={{ opacity: 0, y: 5 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -5 }}
-          transition={{ duration: 0.22 }}
-          className="absolute inset-x-0 block truncate"
-        >
-          {lines[i]}
-        </motion.span>
-      </AnimatePresence>
-    </span>
-  );
-}
-
-/**
- * An invented recipe has no row yet, but the detail sheet renders a Recipe.
- * These are the fields it reads; the rest are the neutral defaults a recipe
- * would have the instant after it was saved.
- */
-function draftRecipe(e: Extraction): Recipe {
-  return {
-    id: "draft",
-    title: e.title,
-    description: e.description,
-    ingredients: e.ingredients,
-    steps: e.steps,
-    servings: e.servings,
-    time_total_min: e.time_total_min,
-    time_active_min: e.time_active_min,
-    status: "want_to_try",
-    hearts: null,
-    effort: null,
-    notes: "",
-    tags: e.tags,
-    cuisine: e.cuisine,
-    course: e.course,
-    season: e.season,
-    occasion: e.occasion,
-    main_ingredients: e.main_ingredients,
-    source_url: null,
-    source_name: e.source_name ?? "Night Kitchen",
-    source_type: "manual",
-    image_url: null,
-    image_thumb_url: null,
-    capture_status: "ready",
-    capture_error: null,
-    capture_gaps: e.gaps,
-    possible_duplicate_of: null,
-    created_at: "",
-    updated_at: "",
-  };
-}
 
 export default function PantryPage() {
   const [onHand, setOnHand] = useState("");

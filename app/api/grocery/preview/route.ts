@@ -9,7 +9,7 @@ import { currentUserId } from "@/lib/auth";
 
 /**
  * POST /api/grocery/preview
- * Body: { recipe_id } | { planned_meal_id } | { planned_meal_ids: [] }
+ * Body: { recipe_id } | { recipe_ids: [] } | { planned_meal_id } | { planned_meal_ids: [] }
  *
  * What *would* be added, annotated with whether you likely already have it.
  * Nothing is written — the user confirms first, so an item is never silently
@@ -23,6 +23,12 @@ export async function POST(req: Request) {
 
   if (body.recipe_id) {
     candidates = await candidatesForRecipe(userId, body.recipe_id);
+  } else if (Array.isArray(body.recipe_ids)) {
+    // A Make meal: every dish's ingredients in one confirm step.
+    const lists = await Promise.all(
+      body.recipe_ids.slice(0, 8).map((id: string) => candidatesForRecipe(userId, String(id)))
+    );
+    candidates = lists.flat();
   } else if (body.planned_meal_id) {
     candidates = await candidatesForPlannedMeal(userId, body.planned_meal_id);
   } else if (Array.isArray(body.planned_meal_ids)) {

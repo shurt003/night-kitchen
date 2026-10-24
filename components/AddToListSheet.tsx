@@ -16,6 +16,7 @@ type Item = {
 /** What to preview: exactly one of these. */
 export type AddSource =
   | { recipe_id: string }
+  | { recipe_ids: string[] }
   | { planned_meal_id: string }
   | { planned_meal_ids: string[] };
 

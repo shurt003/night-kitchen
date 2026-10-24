@@ -140,12 +140,19 @@ rule).
       on every tab; Plan opens from the side menu; Wing it unchanged.
 
 ### Phase 2: Generate (single dish + whole meal)
-- [ ] Principles split; Wing it's prompt byte-identical (assert in a quick
-      script before committing).
-- [ ] `MAKE_SCOPE_SYSTEM` + `/api/make/scope`; servings chips when needed;
+- [x] Principles split; every existing prompt export verified byte-identical
+      against the previous commit (transpile + string compare).
+- [x] `MAKE_SCOPE_SYSTEM` + `/api/make/scope`; servings chips when needed;
       standard yields shown when not.
-- [ ] `MAKE_RECIPE_SYSTEM` + `/api/make/recipe`; drafts in `RecipeDetail`;
-      Save / Save all; Add missing to list.
+- [x] `MAKE_RECIPE_SYSTEM` + `/api/make/recipe`; drafts in `RecipeDetail`;
+      Save / Save all; a meal adds to the list in one confirm step
+      (`recipe_ids` added to the grocery preview/items routes). A single
+      dish adds from its own sheet after saving, as any saved recipe does.
+- [x] Prompt test against the live model (2026-10-24): "chicken tikka
+      masala" asked for servings (1.3s scope, 24s write); "brownies" used
+      "one 9×13 pan, about 16 brownies" with grams + doneness cues (17s);
+      "dinner for 6: short ribs, a side, and a dessert" gave 3 dishes + a
+      7-step game plan (53s).
 - **Phone checklist:**
   - "chicken tikka masala" asks for servings, and the recipe has temps + cues.
   - "brownies" doesn't ask, shows the pan yield, and uses dessert rules

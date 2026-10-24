@@ -13,6 +13,7 @@ export const INVENT_CACHE_KEY = "nk-invent-cache";
 export const INVENT_SESSION_KEY = "nk-invent-session";
 export const PLAN_DRAFTS_KEY = "nk-plan-drafts";
 export const PLAN_SOURCE_KEY = "nk-plan-source";
+export const MAKE_SESSION_KEY = "nk-make-session";
 
 const USER_DATA_CACHE_KEYS = [
   GROCERY_CACHE_KEY,
@@ -20,6 +21,7 @@ const USER_DATA_CACHE_KEYS = [
   INVENT_SESSION_KEY,
   PLAN_DRAFTS_KEY,
   PLAN_SOURCE_KEY,
+  MAKE_SESSION_KEY,
 ];
 
 /** Wipe every localStorage cache that holds a single user's data. */

@@ -3,13 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { springUI } from "@/lib/springs";
+import type { Recipe } from "@/lib/types";
+import type { Extraction, MakeScope } from "@/lib/schemas";
+import { springSoft, springUI } from "@/lib/springs";
+import { RecipeDetail } from "@/components/RecipeDetail";
+import { AddToListSheet } from "@/components/AddToListSheet";
+import { Spinner } from "@/components/Spinner";
+import { CyclingLine } from "@/components/CyclingLine";
+import { draftRecipe } from "@/lib/draftRecipe";
+import { MAKE_SESSION_KEY } from "@/lib/userCache";
 
 /**
  * Make: ask for a dish (or a whole meal) and get a recipe written for it.
  * Unlike Wing it, shopping is allowed — whatever's missing goes to the list.
- * See docs/MAKE_PLAN.md. Phase 1 is the page itself; generation lands in
- * Phase 2.
+ * See docs/MAKE_PLAN.md.
+ *
+ * Two calls: a quick scope read (one dish or a meal, and whether servings need
+ * asking), then the write. Servings are asked every time unless the request
+ * says or the dish has a natural batch size — the owner's call.
  */
 
 /**
@@ -33,13 +44,95 @@ const TIMES: { label: string; max: number | null }[] = [
   { label: "1h or less", max: 60 },
 ];
 
+const SERVING_CHOICES = [1, 2, 4, 6, 8];
+
+/** A meal's dishes are labelled by their place in it, not the library's course pills. */
+const MEAL_ROLE: Record<string, string> = {
+  meals: "Main",
+  sides: "Side",
+  appetizers: "Starter",
+  desserts: "Dessert",
+  drinks: "Drink",
+  misc: "",
+};
+
+/** Braises run for hours — "4h" reads at a glance where "240m" makes you divide. */
+function formatMinutes(min: number): string {
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+/** "2 hours before: sear the ribs" → the timing, bolded, then the step. */
+function splitTiming(step: string): [string | null, string] {
+  const at = step.indexOf(":");
+  // Only a short lead-in counts as a timing — not a colon deep in a sentence.
+  if (at > 0 && at <= 24) return [step.slice(0, at + 1), step.slice(at + 1).trim()];
+  return [null, step];
+}
+
+/** Kitchen noises for the long wait — not a progress report, and not pretending to be one. */
+const WRITING_LINES = [
+  "Reading up on it…",
+  "Getting the mise en place together…",
+  "Checking your staples…",
+  "Balancing salt, fat, acid, heat…",
+  "Working out the timings…",
+  "Writing it all down…",
+];
+const MEAL_LINES = [
+  "Planning the menu…",
+  "Making sure the oven can share…",
+  "Checking your staples…",
+  "Lining up the timings…",
+  "Writing each dish out…",
+  "Putting the game plan together…",
+];
+
+type Result = { dishes: Extraction[]; game_plan: string[] | null; servings: number };
+
+type Session = {
+  ask: string;
+  meal: boolean;
+  maxActive: number | null;
+  scope: MakeScope | null;
+  result: Result | null;
+  /** Saved rows, parallel to result.dishes — null where still a draft. */
+  saved: (Recipe | null)[];
+  /** What the result answers, so the button can say "another version". */
+  answered: string | null;
+  saved_at: number;
+};
+
+/** Twelve hours, like Wing it: today's plan, not last week's. */
+const SESSION_TTL = 12 * 60 * 60 * 1000;
+
 export default function MakePage() {
   const [ask, setAsk] = useState("");
   const [meal, setMeal] = useState(false);
   const [maxActive, setMaxActive] = useState<number | null>(null);
   const [example, setExample] = useState(0);
-  const [notYet, setNotYet] = useState(false);
   const askRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const [scope, setScope] = useState<MakeScope | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
+  const [saved, setSaved] = useState<(Recipe | null)[]>([]);
+  const [answered, setAnswered] = useState<string | null>(null);
+
+  const [scoping, setScoping] = useState(false);
+  /** Waiting on the cook: the scope said servings need asking. */
+  const [askServings, setAskServings] = useState(false);
+  const [otherServings, setOtherServings] = useState("");
+  const [writing, setWriting] = useState<string | null>(null);
+  const writeAbort = useRef<AbortController | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [sheet, setSheet] = useState<number | null>(null);
+  const [savingIndex, setSavingIndex] = useState<number | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addedCount, setAddedCount] = useState<number | null>(null);
 
   // Only cycles while the box is empty — once you're typing, it's your words.
   useEffect(() => {
@@ -47,6 +140,174 @@ export default function MakePage() {
     const t = setInterval(() => setExample((n) => (n + 1) % EXAMPLES.length), 3200);
     return () => clearInterval(t);
   }, [ask]);
+
+  // ------------------------------------------------------------------
+  // A written recipe is a long wait you paid for, so the page survives
+  // leaving it (or the PWA being evicted): inputs + results live in
+  // localStorage, wiped on login/logout via clearUserDataCaches.
+  // ------------------------------------------------------------------
+  const skipSave = useRef(true);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MAKE_SESSION_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw) as Partial<Session>;
+      if (!s.saved_at || Date.now() - s.saved_at > SESSION_TTL) return;
+      setAsk(s.ask ?? "");
+      setMeal(!!s.meal);
+      setMaxActive(s.maxActive ?? null);
+      setScope(s.scope ?? null);
+      setResult(s.result ?? null);
+      setSaved(s.saved ?? []);
+      setAnswered(s.answered ?? null);
+    } catch {
+      // corrupt/blocked storage — start clean
+    }
+  }, []);
+  useEffect(() => {
+    // The mount run carries the initial empty state; writing it would clobber
+    // the stored session before the restore lands.
+    if (skipSave.current) {
+      skipSave.current = false;
+      return;
+    }
+    try {
+      const s: Session = { ask, meal, maxActive, scope, result, saved, answered, saved_at: Date.now() };
+      localStorage.setItem(MAKE_SESSION_KEY, JSON.stringify(s));
+    } catch {
+      // out of quota or private mode — the page just forgets on leave
+    }
+  }, [ask, meal, maxActive, scope, result, saved, answered]);
+
+  /** The question as one comparable string — the chips are part of it. */
+  const question = [ask.trim().toLowerCase(), meal, maxActive ?? ""].join("|");
+  const sameQuestion = answered !== null && answered === question;
+  const busy = scoping || !!writing;
+
+  function clearAll() {
+    setScope(null);
+    setResult(null);
+    setSaved([]);
+    setAnswered(null);
+    setAskServings(false);
+    setError(null);
+    setAddedCount(null);
+  }
+
+  async function start() {
+    if (!ask.trim() || busy) return;
+    setError(null);
+    setAddedCount(null);
+
+    // Same question again: the scope still holds — skip straight to writing
+    // another version for the same servings.
+    if (sameQuestion && scope && result) {
+      return write(scope, result.servings);
+    }
+
+    setScoping(true);
+    setAskServings(false);
+    try {
+      const res = await fetch("/api/make/scope", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: ask, whole_meal: meal }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't read that.");
+      const s = json.scope as MakeScope;
+      setScope(s);
+      if (s.servings_in_request == null && s.standard_yield == null) {
+        setAskServings(true);
+      } else {
+        await write(s, null);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't read that.");
+    } finally {
+      setScoping(false);
+    }
+  }
+
+  async function write(s: MakeScope, servings: number | null) {
+    setAskServings(false);
+    setOtherServings("");
+    const controller = new AbortController();
+    writeAbort.current = controller;
+    setWriting(s.kind === "meal" ? "Your meal" : s.dishes[0]?.title ?? "Your recipe");
+    setError(null);
+    try {
+      const res = await fetch("/api/make/recipe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: ask, scope: s, servings, max_active_min: maxActive }),
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't write that one out.");
+      const r = json as Result;
+      setResult(r);
+      setSaved(r.dishes.map(() => null));
+      setAnswered(question);
+      // One dish goes straight to the recipe — there's nothing else to look at.
+      if (r.dishes.length === 1) setSheet(0);
+    } catch (e) {
+      // Cancelling is a choice, not a failure — no banner for it.
+      if ((e as Error).name !== "AbortError") {
+        setError(e instanceof Error ? e.message : "Couldn't write that one out.");
+      }
+    } finally {
+      writeAbort.current = null;
+      setWriting(null);
+    }
+  }
+
+  async function saveDish(i: number): Promise<Recipe | null> {
+    if (!result || saved[i]) return saved[i] ?? null;
+    const res = await fetch("/api/recipes/manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipe: result.dishes[i] }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setError(json.error ?? "Couldn't save that.");
+      return null;
+    }
+    const row = json.recipe as Recipe;
+    setSaved((prev) => {
+      const next = [...prev];
+      next[i] = row;
+      return next;
+    });
+    return row;
+  }
+
+  async function saveFromSheet() {
+    if (sheet === null || savingIndex !== null) return;
+    setSavingIndex(sheet);
+    await saveDish(sheet);
+    setSavingIndex(null);
+  }
+
+  async function saveAll() {
+    if (!result || savingAll) return;
+    setSavingAll(true);
+    setError(null);
+    // One at a time: a failure stops the run with the rest left as drafts,
+    // rather than leaving a half-saved meal you can't see the state of.
+    for (let i = 0; i < result.dishes.length; i++) {
+      if (saved[i]) continue;
+      const row = await saveDish(i);
+      if (!row) break;
+    }
+    setSavingAll(false);
+  }
+
+  const allSaved = !!result && result.dishes.length > 0 && saved.length === result.dishes.length && saved.every(Boolean);
+  const isMeal = !!result && result.dishes.length > 1;
+  const yieldLabel =
+    scope?.standard_yield && scope.servings_in_request == null ? scope.standard_yield.label : null;
 
   return (
     <main className="px-4 pt-[max(env(safe-area-inset-top),16px)]">
@@ -68,7 +329,7 @@ export default function MakePage() {
           value={ask}
           onChange={(e) => {
             setAsk(e.target.value);
-            setNotYet(false);
+            if (!e.target.value.trim()) clearAll();
           }}
           rows={3}
           aria-label="What do you want to make?"
@@ -94,7 +355,7 @@ export default function MakePage() {
           <button
             onClick={() => {
               setAsk("");
-              setNotYet(false);
+              clearAll();
               askRef.current?.focus();
             }}
             aria-label="Clear"
@@ -105,8 +366,8 @@ export default function MakePage() {
         )}
       </div>
 
-      {/* One dish or a whole meal. Make also reads it from the words ("a main
-          and a side"), so this is a nudge, not a gate. */}
+      {/* One dish or a whole meal. The scope read also hears it in the words
+          ("a main and a side"), so this is a nudge, not a gate. */}
       <div className="mt-2 flex gap-2">
         {[
           { label: "One dish", value: false },
@@ -147,23 +408,267 @@ export default function MakePage() {
       <motion.button
         whileTap={{ scale: 0.97 }}
         transition={springUI}
-        // Phase 1 stub: the page and nav ship first; generation is Phase 2.
-        onClick={() => setNotYet(true)}
-        disabled={!ask.trim()}
+        onClick={start}
+        disabled={!ask.trim() || busy || askServings}
         className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-flame py-3.5 font-display font-bold text-accent-ink disabled:opacity-40"
       >
-        {meal ? "Make the meal" : "Make it"}
+        {scoping && <Spinner />}
+        {scoping
+          ? "Reading that…"
+          : sameQuestion
+            ? "Write another version"
+            : meal
+              ? "Make the meal"
+              : "Make it"}
       </motion.button>
+      {error && <p className="mt-2 text-sm text-flame">{error}</p>}
+
+      {/* Servings, asked only when it matters: a per-person dish with no
+          number in the request. One tap answers it and the write starts. */}
       <AnimatePresence>
-        {notYet && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+        {askServings && scope && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="mt-3 rounded-xl border border-char/10 bg-surface p-4 text-sm text-smoke"
+            transition={springSoft}
+            className="mt-4 rounded-xl border border-char/10 bg-surface p-4"
           >
-            Recipe writing is coming in the next update — this is just the new page for now.
-          </motion.p>
+            <p className="font-display text-base font-bold">How many servings?</p>
+            <p className="mt-0.5 text-sm text-smoke">
+              {scope.kind === "meal"
+                ? scope.dishes.map((d) => d.title).join(" · ")
+                : scope.dishes[0]?.title}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {SERVING_CHOICES.map((n) => (
+                <motion.button
+                  key={n}
+                  whileTap={{ scale: 0.94 }}
+                  transition={springUI}
+                  onClick={() => write(scope, n)}
+                  className="h-11 min-w-11 rounded-full bg-char/5 px-4 font-display text-base font-bold"
+                >
+                  {n}
+                </motion.button>
+              ))}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const n = parseInt(otherServings, 10);
+                  if (n > 0 && n <= 50) write(scope, n);
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  value={otherServings}
+                  onChange={(e) => setOtherServings(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                  inputMode="numeric"
+                  placeholder="Other"
+                  aria-label="Other number of servings"
+                  className="h-11 w-20 rounded-full border border-char/15 bg-tile px-3 text-center text-base outline-none focus:border-flame"
+                />
+                {otherServings && (
+                  <button type="submit" className="h-11 rounded-full bg-char px-4 text-sm font-semibold text-tile">
+                    Go
+                  </button>
+                )}
+              </form>
+            </div>
+            <button
+              onClick={() => setAskServings(false)}
+              className="mt-3 text-sm font-semibold text-smoke underline underline-offset-2"
+            >
+              Never mind
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {result && !askServings && (
+          <motion.section initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6">
+            <h2 className="font-display text-xs font-bold uppercase tracking-widest text-flame">
+              {isMeal ? "Your meal" : "Your recipe"}
+            </h2>
+            <p className="mt-1 text-sm text-smoke">
+              {yieldLabel ?? `Serves ${result.servings}`}
+            </p>
+
+            <ul className="mt-2 space-y-2">
+              {result.dishes.map((d, i) => (
+                <motion.li
+                  key={`${d.title}-${i}`}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ ...springSoft, delay: i * 0.04 }}
+                >
+                  <button
+                    onClick={() => setSheet(i)}
+                    className="w-full rounded-[14px] border border-char/10 bg-surface p-3 text-left"
+                  >
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 flex-1 font-display text-[15px] font-bold">{d.title}</span>
+                      {isMeal && MEAL_ROLE[d.course] && (
+                        <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-smoke">
+                          {MEAL_ROLE[d.course]}
+                        </span>
+                      )}
+                    </span>
+                    {/* No `block` here: line-clamp needs its own display value
+                        to cut the text off at two lines. */}
+                    {d.description && (
+                      <span className="mt-0.5 line-clamp-2 text-xs text-smoke">{d.description}</span>
+                    )}
+                    <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      {d.time_active_min != null && (
+                        <span className="text-smoke">
+                          {formatMinutes(d.time_active_min)} active
+                          {d.time_total_min != null &&
+                            d.time_total_min !== d.time_active_min &&
+                            ` · ${formatMinutes(d.time_total_min)} total`}
+                        </span>
+                      )}
+                      <span className={`ml-auto font-semibold ${saved[i] ? "text-herb" : "text-smoke"}`}>
+                        {saved[i] ? "✓ Saved" : "Not saved yet"}
+                      </span>
+                    </span>
+                  </button>
+                </motion.li>
+              ))}
+            </ul>
+
+            {result.game_plan && (
+              <div className="mt-4 rounded-xl border border-char/10 bg-surface p-4">
+                <p className="font-display text-sm font-bold">Game plan</p>
+                <ol className="mt-2 space-y-2 text-sm">
+                  {result.game_plan.map((step, i) => {
+                    const [timing, rest] = splitTiming(step);
+                    return (
+                      <li key={i} className="flex gap-2.5">
+                        <span className="mt-px font-display font-bold text-flame">{i + 1}</span>
+                        <span>
+                          {timing && <span className="font-semibold">{timing} </span>}
+                          {rest}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
+
+            {/* A meal saves and shops as one: save the lot, then one confirm
+                step for every dish's ingredients. A single dish does both from
+                its own sheet. */}
+            {isMeal && (
+              <div className="mt-3 space-y-2">
+                {!allSaved && (
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    transition={springUI}
+                    onClick={saveAll}
+                    disabled={savingAll}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-char py-3 font-display font-bold text-tile disabled:opacity-50"
+                  >
+                    {savingAll && <Spinner className="h-4 w-4" />}
+                    {savingAll ? "Saving…" : "Save all to my library"}
+                  </motion.button>
+                )}
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  transition={springUI}
+                  onClick={() => setAddOpen(true)}
+                  disabled={!allSaved}
+                  className={`w-full rounded-xl py-3 font-display font-bold disabled:opacity-40 ${
+                    addedCount ? "bg-herb text-chalk" : "border border-char/15 text-char"
+                  }`}
+                >
+                  {addedCount ? `✓ ${addedCount} on the list` : "Add everything to grocery list"}
+                </motion.button>
+                {!allSaved && (
+                  <p className="text-center text-xs text-smoke">Save the meal first, then add it to the list.</p>
+                )}
+              </div>
+            )}
+          </motion.section>
+        )}
+      </AnimatePresence>
+
+      {/* Writing is the one wait long enough to look like a hang, so it gets a
+          modal with a way out — same as Wing it. */}
+      <AnimatePresence>
+        {writing && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-scrim/50"
+            />
+            <motion.div
+              role="dialog"
+              aria-live="polite"
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              transition={springUI}
+              className="fixed left-1/2 top-1/2 z-50 w-[min(88vw,20rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-tile p-5 text-center shadow-2xl"
+            >
+              <Spinner className="mx-auto h-7 w-7 text-flame" />
+              <p className="mt-3 font-display text-lg font-bold leading-tight">{writing}</p>
+              <CyclingLine
+                lines={scope?.kind === "meal" ? MEAL_LINES : WRITING_LINES}
+                className="mt-1 h-5 text-sm text-smoke"
+              />
+              <button
+                onClick={() => writeAbort.current?.abort()}
+                className="mt-4 w-full rounded-xl border border-char/15 py-2.5 text-sm font-semibold text-smoke"
+              >
+                Cancel
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {sheet !== null && result?.dishes[sheet] && (
+          <RecipeDetail
+            key={sheet}
+            recipe={saved[sheet] ?? draftRecipe(result.dishes[sheet])}
+            draft={!saved[sheet]}
+            saving={savingIndex === sheet}
+            onSave={saveFromSheet}
+            onClose={() => setSheet(null)}
+            onChanged={(r) =>
+              setSaved((prev) => {
+                const next = [...prev];
+                next[sheet] = r;
+                return next;
+              })
+            }
+            onDelete={() => {
+              // Deleted from the library: back to a draft you could save again.
+              setSaved((prev) => {
+                const next = [...prev];
+                next[sheet] = null;
+                return next;
+              });
+              setSheet(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {addOpen && allSaved && (
+          <AddToListSheet
+            source={{ recipe_ids: saved.map((r) => (r as Recipe).id) }}
+            title="Add the meal to your list"
+            onClose={() => setAddOpen(false)}
+            onAdded={(n) => setAddedCount(n)}
+          />
         )}
       </AnimatePresence>
     </main>

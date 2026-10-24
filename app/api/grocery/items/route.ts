@@ -14,6 +14,7 @@ import { currentUserId } from "@/lib/auth";
  * POST /api/grocery/items
  * Body: { items: [{name, quantity?}] }        — manual add (the fastest path)
  *    or { recipe_id }                         — a recipe's ingredients
+ *    or { recipe_ids: [] }                    — a Make meal's dishes at once
  *    or { planned_meal_id }                   — any filled planner slot
  *    or { planned_meal_ids: [] }              — the Sunday bulk add
  *    or { full_items: [...] }                 — verbatim insert (undo / offline sync)
@@ -59,6 +60,11 @@ export async function POST(req: Request) {
 
   if (body.recipe_id) {
     candidates = await candidatesForRecipe(userId, body.recipe_id);
+  } else if (Array.isArray(body.recipe_ids)) {
+    const lists = await Promise.all(
+      body.recipe_ids.slice(0, 8).map((id: string) => candidatesForRecipe(userId, String(id)))
+    );
+    candidates = lists.flat();
   } else if (body.planned_meal_id) {
     candidates = await candidatesForPlannedMeal(userId, body.planned_meal_id);
   } else if (Array.isArray(body.planned_meal_ids)) {

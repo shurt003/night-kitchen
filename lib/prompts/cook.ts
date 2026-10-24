@@ -49,20 +49,77 @@ Respond with ONLY JSON: { "note": "the note" }`;
 
 // Shared sensibility for invented dishes — distilled (in original wording,
 // influenced-by not copied-from) from Salt Fat Acid Heat and The Food Lab, plus
-// USDA safe internal temperatures. Injected into both invent prompts so the
-// whole style is tuned in one place.
-export const COOKING_PRINCIPLES = `Cook with the sensibility of Salt Fat Acid Heat and The Food Lab: flavour comes from technique, balance, and using what's already in the kitchen well — not from a long shopping list. Let these shape the dishes you choose and how you cook them.
-- Season in stages as you cook and taste as you go — salt builds flavour from within, not as a last-second sprinkle. Salt your pasta and blanching water. If there's time, salt proteins 20–40 minutes ahead so it soaks in — but this is tonight's dinner, so never require a long brine or overnight cure.
-- Put their seasoning shelf to work. Staples often include lots of spices, sauces, and condiments — treat them as a flavour resource, not decoration. Build a spice blend, bloom aromatics in fat, layer a sauce or paste that suits the dish. Reach for several where they cohere; don't leave a well-stocked shelf on salt-and-pepper — but don't empty it into one pan either.
-- Balance salt, fat, acid, and heat. When a dish tastes flat, it's almost always missing salt or acid, not more ingredients.
-- Use acid to lift and sharpen — a squeeze of lemon, a splash of vinegar, a spoon of yoghurt — layered through the dish and again at the finish. Build it in, but with judgement: not every dish wants it (delicate, sweet, or dairy-forward ones especially).
-- Use fat on purpose: to brown, to carry flavour, to add richness or crispness.
-- Get real browning. Dry the surface, use enough heat, don't crowd the pan — Maillard and caramelisation are where most flavour comes from.
-- Control heat deliberately: high to sear, gentle to cook through, low and slow to render or braise. Match the heat to the goal and say which.
-- Build flavour as you go — bloom spices in fat, make a fond and deglaze it, reduce for concentration — rather than dumping everything in at once.
-- Give contrast: something crisp against something soft, fresh against rich.
-- Don't say "cook until done." Describe doneness by cue — colour, firmness, juices, flake — and for proteins give a target internal temperature: poultry 165°F; ground meat 160°F; whole cuts of beef/pork/lamb 145°F (rest 3 minutes); fish 145°F or until it flakes. Whole-muscle beef and lamb can go by preference (~130–135°F for medium-rare), but poultry, ground meat, and fish must reach their safe number — never pink-and-hopeful.
-- Rest meat off the heat and pull it a few degrees early — carryover keeps cooking it (5–10°F on roasts, 3–5°F on steaks).`;
+// USDA safe internal temperatures. Kept as named lines so Wing it and Make draw
+// on the same wording: change a shared line once and both pick it up.
+
+/** Lines that hold for any savory or sweet dish. */
+const CORE = {
+  balance:
+    "- Balance salt, fat, acid, and heat. When a dish tastes flat, it's almost always missing salt or acid, not more ingredients.",
+  acid: "- Use acid to lift and sharpen — a squeeze of lemon, a splash of vinegar, a spoon of yoghurt — layered through the dish and again at the finish. Build it in, but with judgement: not every dish wants it (delicate, sweet, or dairy-forward ones especially).",
+  fat: "- Use fat on purpose: to brown, to carry flavour, to add richness or crispness.",
+  browning:
+    "- Get real browning. Dry the surface, use enough heat, don't crowd the pan — Maillard and caramelisation are where most flavour comes from.",
+  heat: "- Control heat deliberately: high to sear, gentle to cook through, low and slow to render or braise. Match the heat to the goal and say which.",
+  build:
+    "- Build flavour as you go — bloom spices in fat, make a fond and deglaze it, reduce for concentration — rather than dumping everything in at once.",
+  contrast: "- Give contrast: something crisp against something soft, fresh against rich.",
+};
+
+/** Meat, fish and doneness — savory dishes only. */
+const SAVORY = {
+  doneness:
+    "- Don't say \"cook until done.\" Describe doneness by cue — colour, firmness, juices, flake — and for proteins give a target internal temperature: poultry 165°F; ground meat 160°F; whole cuts of beef/pork/lamb 145°F (rest 3 minutes); fish 145°F or until it flakes. Whole-muscle beef and lamb can go by preference (~130–135°F for medium-rare), but poultry, ground meat, and fish must reach their safe number — never pink-and-hopeful.",
+  rest: "- Rest meat off the heat and pull it a few degrees early — carryover keeps cooking it (5–10°F on roasts, 3–5°F on steaks).",
+};
+
+// Wing it's block: cook tonight from what's already here. Its composed text
+// must not change — Make's needs live in their own lines below.
+export const COOKING_PRINCIPLES = [
+  "Cook with the sensibility of Salt Fat Acid Heat and The Food Lab: flavour comes from technique, balance, and using what's already in the kitchen well — not from a long shopping list. Let these shape the dishes you choose and how you cook them.",
+  "- Season in stages as you cook and taste as you go — salt builds flavour from within, not as a last-second sprinkle. Salt your pasta and blanching water. If there's time, salt proteins 20–40 minutes ahead so it soaks in — but this is tonight's dinner, so never require a long brine or overnight cure.",
+  "- Put their seasoning shelf to work. Staples often include lots of spices, sauces, and condiments — treat them as a flavour resource, not decoration. Build a spice blend, bloom aromatics in fat, layer a sauce or paste that suits the dish. Reach for several where they cohere; don't leave a well-stocked shelf on salt-and-pepper — but don't empty it into one pan either.",
+  CORE.balance,
+  CORE.acid,
+  CORE.fat,
+  CORE.browning,
+  CORE.heat,
+  CORE.build,
+  CORE.contrast,
+  SAVORY.doneness,
+  SAVORY.rest,
+].join("\n");
+
+// Make's block: shopping is allowed and there may be time to plan ahead, so it
+// drops Wing it's on-hand and tonight-only lines — and adds baking, since Make
+// is asked for desserts and Wing it never is. The baking lines are general
+// baking science in our own words, not attributed to either book.
+const MAKE_PRINCIPLES = [
+  "Cook with the sensibility of Salt Fat Acid Heat and The Food Lab: flavour comes from technique and balance. Let these shape every dish and how its steps are written. The core applies to everything; use the savory lines for savory dishes and the baking lines for desserts and baked goods.",
+  "",
+  "Core:",
+  "- Season in stages as you cook and taste as you go — salt builds flavour from within, not as a last-second sprinkle. Salt your pasta and blanching water. Salting proteins ahead (40 minutes to overnight) is worth it when there's time — offer it as an option, never a requirement.",
+  CORE.balance,
+  CORE.acid,
+  CORE.fat,
+  CORE.browning,
+  CORE.heat,
+  CORE.build,
+  CORE.contrast,
+  "",
+  "Savory:",
+  SAVORY.doneness,
+  SAVORY.rest,
+  "",
+  "Desserts and baking:",
+  "- Precision matters more here. Give grams alongside cups and spoons for flour, sugar, butter and liquids, and exact oven temperatures. Preheat fully.",
+  "- Butter temperature is a technique: cold for flaky (pie, biscuits, scones), softened for creaming (cakes, cookies), melted for chewy and dense, browned for nutty depth. Say which and why.",
+  "- Salt belongs in sweets — it sharpens sweetness and flavour rather than making it taste salty. Acid brightens too (zest, a squeeze of juice, buttermilk, yoghurt), and with baking soda it's also lift.",
+  "- Build flavour with heat: toast nuts and spices, take caramel to amber, brown the butter, bake until properly golden rather than pale.",
+  "- Once flour is in, mix only until combined — more makes it tough.",
+  "- Doneness by cue: a toothpick with moist crumbs, set edges and a slight centre wobble, a hollow sound for bread. Give internal temperatures where they're the reliable test (bread about 190–210°F, custards about 170–175°F).",
+  "- Desserts keep cooking and setting as they cool. Say how long to cool before cutting and why.",
+].join("\n");
 
 
 export const INVENT_PITCHES_SYSTEM = `You invent dinner ideas from what someone actually has in their kitchen right now.
@@ -147,4 +204,82 @@ Respond with ONLY JSON:
   "source_name": "Night Kitchen",
   "confidence": 0.8,
   "gaps": ["anything you're genuinely unsure about"]
+}`;
+
+/**
+ * Make, step one: a quick read of the request before anything is written —
+ * one dish or a meal, and whether servings need asking. The cook is asked for
+ * a number every time unless the dish has a natural batch size or the request
+ * already says.
+ */
+export const MAKE_SCOPE_SYSTEM = `Someone has said what they want to cook. Before anything is written, work out its shape. You are not writing a recipe.
+
+You are given "request" (their words) and "whole_meal" (true if they tapped "Whole meal" — a strong hint, but their words win if they clearly ask for one dish).
+
+Decide:
+- "kind": "meal" when they want several dishes that go together (a main and a side, "dinner", a menu, a dessert alongside), otherwise "dish".
+- "dishes": what will be written, in serving order. For a dish, exactly one. For a meal, 2–4: exactly what they named, plus a side only when a main plainly needs one and they asked for a meal. Never add a course they didn't ask for beyond that. "course" is one of "meals" (a main), "appetizers", "sides", "desserts", "drinks", "misc".
+- "servings_in_request": the number of people or servings if their words say it ("for 6", "two of us", "a dozen"), else null.
+- "standard_yield": when the dish has a natural batch size that has nothing to do with headcount — baked goods and anything defined by its pan, loaf, tray or pot: brownies, cookies, cakes, pies, bread, muffins, meatloaf, lasagna, a casserole, a big pot of chili or soup, a batch of sauce or dressing. Give { "servings": how many it serves or makes, "label": a short phrase like "one 9×13 pan, about 16 brownies" }. Null for anything portioned per person — a steak, a pasta dish, a curry, a stir-fry, a salad for the table. A meal is portioned per person: null, unless every dish in it is batch-sized.
+- "not_food": true only if this isn't something anyone could cook or make in a kitchen.
+
+Respond with ONLY JSON:
+{
+  "kind": "dish",
+  "dishes": [ { "title": "Chicken tikka masala", "course": "meals" } ],
+  "servings_in_request": null,
+  "standard_yield": null,
+  "not_food": false
+}`;
+
+/**
+ * Make, step two: the recipe — or a whole meal and the order to cook it in.
+ * Shopping is allowed here (unlike Wing it), so staples are a resource rather
+ * than a fence.
+ */
+export const MAKE_RECIPE_SYSTEM = `You write recipes for exactly what someone asked to cook. Shopping is fine — they'll buy whatever they don't have.
+
+You are given "request" (their words), "kind" ("dish" or "meal"), "dishes" (what to write, in serving order), "servings" (how many to cook for), "yield_label" (a batch size, when the dish has one), an optional "max_active_min", and "staples" (things they always keep in).
+
+Rules:
+- Write what they asked for. If they named a known dish, write an excellent, faithful version of it — not a twist — unless they asked for a twist. Write it in your own words; never reproduce a published recipe's text.
+- Quantities for "servings", and set each dish's "servings" to that number. When "yield_label" is given, write for that batch instead and say it in the description ("Makes one 9×13 pan, about 16 brownies").
+- Use their staples where they genuinely fit — that's what they keep in for — but call for anything the dish needs. Don't bend a dish out of shape to avoid a shop.
+- A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then "game_plan": 4–8 short steps that sequence the whole cook so everything is ready together, each starting with its timing relative to eating ("2 hours before: …", "15 min before: …", "To serve: …"). For a single dish, "game_plan" is null.
+- If "max_active_min" is set, keep hands-on time inside it — for a meal, the cook's total hands-on time across all dishes. Unattended time doesn't count.
+- Be honest about "time_total_min" and "time_active_min".
+- Ingredients: "raw" is the full line as a person would read it ("2 tbsp soy sauce"); the other fields break that same line apart. Use "section" only when the recipe genuinely has parts ("For the sauce").
+- Steps carry real technique — heat level, what it should look like, what to listen for.
+- "timer_seconds" only where a step is genuinely timed and unattended. Null everywhere else.
+- "course" is "meals" (a main), "appetizers", "sides", "desserts", "drinks", or "misc".
+- Nobody has cooked this yet. Put anything you're unsure about in "gaps" — a time that depends on their oven, a substitution you're guessing at.
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON:
+{
+  "dishes": [
+    {
+      "title": "...",
+      "description": "a sentence or two on what it is",
+      "ingredients": [
+        { "raw": "2 tbsp soy sauce", "quantity": "2", "unit": "tbsp", "item": "soy sauce", "note": null, "section": null }
+      ],
+      "steps": [ { "text": "...", "timer_seconds": null } ],
+      "servings": 4,
+      "time_total_min": 35,
+      "time_active_min": 20,
+      "tags": ["weeknight"],
+      "cuisine": "Indian",
+      "course": "meals",
+      "season": [],
+      "occasion": [],
+      "main_ingredients": ["chicken thighs", "yoghurt"],
+      "image_url": null,
+      "source_name": "Night Kitchen",
+      "confidence": 0.8,
+      "gaps": []
+    }
+  ],
+  "game_plan": null
 }`;

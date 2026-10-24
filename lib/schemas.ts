@@ -127,6 +127,29 @@ export const InventPitchesSchema = z.object({
     .default([]),
 });
 
+/** Make, step one: the shape of the request, and whether servings need asking. */
+export const MakeScopeSchema = z.object({
+  kind: z.enum(["dish", "meal"]).catch("dish"),
+  dishes: z
+    .array(z.object({ title: z.string(), course: z.enum(COURSES).catch("misc").default("misc") }))
+    .min(1)
+    .max(4),
+  servings_in_request: z.number().int().positive().nullable().default(null),
+  standard_yield: z
+    .object({ servings: z.number().int().positive(), label: z.string() })
+    .nullable()
+    .default(null),
+  not_food: z.boolean().default(false),
+});
+export type MakeScope = z.infer<typeof MakeScopeSchema>;
+
+/** Make, step two: one recipe, or a meal's recipes plus the order to cook them. */
+export const MakeRecipeSchema = z.object({
+  dishes: z.array(ExtractionSchema).min(1).max(4),
+  game_plan: z.array(z.string()).nullable().default(null),
+});
+export type MakeResult = z.infer<typeof MakeRecipeSchema>;
+
 export const SubstituteSchema = z.object({
   suggestions: z
     .array(z.object({ swap: z.string(), note: z.string().default("") }))
