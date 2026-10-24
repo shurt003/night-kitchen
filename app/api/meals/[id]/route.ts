@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { deleteRecipeFully, getMeal, ownsRecipes, setMealDishes } from "@/lib/savedMeals";
+import { WeekOutlineSchema } from "@/lib/schemas";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,6 +25,12 @@ const Patch = z
     serve_time: z.union([z.string().regex(/^\d{2}:\d{2}$/), z.literal(""), z.null()]),
     // After a swap: the meal's dishes, in order.
     recipe_ids: z.array(z.string().uuid()).min(1).max(8),
+    // A week's swap: every dish with its night, and the updated outline.
+    dishes: z
+      .array(z.object({ recipe_id: z.string().uuid(), night: z.number().int().min(0).max(7), note: z.string().max(40).nullable().optional() }))
+      .min(1)
+      .max(16),
+    week: WeekOutlineSchema,
   })
   .partial();
 
@@ -45,14 +52,17 @@ export async function PATCH(req: Request, { params }: Params) {
   if (p.servings !== undefined) fields.servings = p.servings;
   if (p.game_plan !== undefined) fields.game_plan = p.game_plan ?? [];
   if (p.serve_time !== undefined) fields.serve_time = p.serve_time || null;
+  if (p.week !== undefined) fields.nights = p.week;
   const { error } = await db().from("saved_meals").update(fields).eq("id", id).eq("user_id", userId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (p.recipe_ids) {
-    if (!(await ownsRecipes(userId, p.recipe_ids))) {
+  const dishes = p.dishes ?? p.recipe_ids;
+  if (dishes) {
+    const ids = dishes.map((d) => (typeof d === "string" ? d : d.recipe_id));
+    if (!(await ownsRecipes(userId, ids))) {
       return NextResponse.json({ error: "Save the dishes first." }, { status: 400 });
     }
-    await setMealDishes(id, p.recipe_ids);
+    await setMealDishes(id, dishes);
   }
   return NextResponse.json({ meal: await getMeal(userId, id) });
 }

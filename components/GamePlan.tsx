@@ -13,41 +13,46 @@ import { formatClock, parseServeTime, stepTiming, type GamePlanStep } from "@/li
  */
 export function GamePlan({
   steps,
-  serveTime,
+  serveTime = null,
   onServeTimeChange,
+  title = "Game plan",
 }: {
   steps: GamePlanStep[];
   /** "19:00", or null when no dinner time is set. */
-  serveTime: string | null;
-  onServeTimeChange: (t: string | null) => void;
+  serveTime?: string | null;
+  /** Leave out for a plan with no dinner to time against (a week's prep session). */
+  onServeTimeChange?: (t: string | null) => void;
+  title?: string;
 }) {
   const serveMin = parseServeTime(serveTime);
 
   return (
     <div className="rounded-xl border border-char/10 bg-surface p-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="font-display text-sm font-bold">Game plan</p>
-        <div className="flex items-center gap-1">
-          <label className="relative cursor-pointer rounded-full bg-char/5 px-3 py-1.5 text-xs font-semibold text-char">
-            {serveMin === null ? "What time is dinner?" : `Dinner at ${formatClock(serveMin)}`}
-            <input
-              type="time"
-              value={serveTime ?? ""}
-              onChange={(e) => onServeTimeChange(e.target.value || null)}
-              aria-label="What time is dinner?"
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            />
-          </label>
-          {serveMin !== null && (
-            <button
-              onClick={() => onServeTimeChange(null)}
-              aria-label="Clear dinner time"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-sm text-smoke/70"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+        <p className="font-display text-sm font-bold">{title}</p>
+        {onServeTimeChange && (
+          <div className="flex items-center gap-1">
+            <label className="relative cursor-pointer rounded-full bg-char/5 px-3 py-1.5 text-xs font-semibold text-char">
+              {serveMin === null ? "What time is dinner?" : `Dinner at ${formatClock(serveMin)}`}
+              <input
+                type="time"
+                value={serveTime ?? ""}
+                onChange={(e) => onServeTimeChange(e.target.value || null)}
+                aria-label="What time is dinner?"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </label>
+            {serveMin !== null && (
+              <button
+                onClick={() => onServeTimeChange(null)}
+                aria-label="Clear dinner time"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-sm text-smoke/70"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <ol className="mt-2 space-y-2 text-sm">
         {steps.map((step, i) => {

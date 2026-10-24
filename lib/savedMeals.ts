@@ -2,6 +2,7 @@ import { db } from "./db";
 import type { Recipe } from "./types";
 import type { GamePlanStep } from "./gamePlan";
 import { normalizeGamePlan } from "./gamePlan";
+import type { WeekOutline } from "./weekPlan";
 
 /**
  * A Make meal kept together: its dishes (ordinary recipes), its game plan and,
@@ -17,11 +18,21 @@ export type SavedMeal = {
   serve_time: string | null;
   kind: "meal" | "nights";
   created_at: string;
+  /**
+   * For a planned week: the outline it was written from (components, nights,
+   * prep session). Null for a single meal. Dishes on night 0 are the prep
+   * components (their `note` is the component key); nights 1..n are dinners.
+   */
+  week: WeekOutline | null;
   dishes: { id: string; night: number; position: number; note: string | null; recipe: Recipe }[];
 };
 
-type Row = Omit<SavedMeal, "dishes" | "game_plan"> & {
+/** One dish of a saved meal: which recipe, on which night (0 = prep), with an optional note. */
+export type MealDishInput = { recipe_id: string; night: number; note?: string | null };
+
+type Row = Omit<SavedMeal, "dishes" | "game_plan" | "week"> & {
   game_plan: unknown;
+  nights: unknown;
   saved_meal_dishes: {
     id: string;
     night: number;
@@ -32,7 +43,7 @@ type Row = Omit<SavedMeal, "dishes" | "game_plan"> & {
 };
 
 const SELECT =
-  "id, title, request, servings, game_plan, serve_time, kind, created_at, saved_meal_dishes(id, night, position, note, recipe:recipes(*))";
+  "id, title, request, servings, game_plan, serve_time, kind, nights, created_at, saved_meal_dishes(id, night, position, note, recipe:recipes(*))";
 
 function shape(row: Row): SavedMeal {
   const dishes = (row.saved_meal_dishes ?? [])
@@ -49,6 +60,11 @@ function shape(row: Row): SavedMeal {
     serve_time: row.serve_time ? row.serve_time.slice(0, 5) : null,
     kind: row.kind,
     created_at: row.created_at,
+    // A week keeps its outline in `nights` (an object); a meal leaves it [].
+    week:
+      row.kind === "nights" && row.nights && typeof row.nights === "object" && !Array.isArray(row.nights)
+        ? (row.nights as WeekOutline)
+        : null,
     dishes,
   };
 }
@@ -83,12 +99,22 @@ export async function ownsRecipes(userId: string, ids: string[]): Promise<boolea
   return (data ?? []).length === unique.length;
 }
 
-/** Replace a meal's dishes with these recipes, in this order (all on night 1). */
-export async function setMealDishes(mealId: string, recipeIds: string[]) {
+/**
+ * Replace a meal's dishes. Plain recipe ids are a single meal, in order, all on
+ * night 1; a week passes each dish's night (0 = prep) and note. Position counts
+ * up within each night.
+ */
+export async function setMealDishes(mealId: string, dishes: string[] | MealDishInput[]) {
   const supabase = db();
   const { error: delError } = await supabase.from("saved_meal_dishes").delete().eq("meal_id", mealId);
   if (delError) throw new Error(delError.message);
-  const rows = recipeIds.map((recipe_id, position) => ({ meal_id: mealId, recipe_id, position, night: 1 }));
+  const list: MealDishInput[] = dishes.map((d) => (typeof d === "string" ? { recipe_id: d, night: 1 } : d));
+  const perNight = new Map<number, number>();
+  const rows = list.map((d) => {
+    const position = perNight.get(d.night) ?? 0;
+    perNight.set(d.night, position + 1);
+    return { meal_id: mealId, recipe_id: d.recipe_id, night: d.night, position, note: d.note ?? null };
+  });
   const { error } = await supabase.from("saved_meal_dishes").insert(rows);
   if (error) throw new Error(error.message);
 }

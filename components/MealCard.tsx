@@ -15,6 +15,8 @@ export function MealCard({ meal, onOpen }: { meal: SavedMeal; onOpen: (m: SavedM
     null;
   const mainPhoto = main?.recipe.image_thumb_url ?? main?.recipe.image_url ?? photo;
   const count = meal.dishes.length;
+  // A week reads by its nights ("5 nights · 7 recipes"); a meal by its dishes.
+  const week = meal.kind === "nights" ? meal.week : null;
 
   return (
     <motion.button
@@ -35,11 +37,14 @@ export function MealCard({ meal, onOpen }: { meal: SavedMeal; onOpen: (m: SavedM
       <span className="min-w-0 flex-1 py-0.5">
         <span className="block font-display text-[15px] font-bold leading-snug">{meal.title}</span>
         <span className="mt-0.5 line-clamp-2 text-xs text-smoke">
-          {meal.dishes.map((d) => d.recipe.title).join(" · ")}
+          {week
+            ? week.nights.map((n) => n.title).join(" · ")
+            : meal.dishes.map((d) => d.recipe.title).join(" · ")}
         </span>
         <span className="mt-1 block text-xs font-semibold text-char/50">
-          {count} {count === 1 ? "dish" : "dishes"}
-          {meal.servings ? ` · serves ${meal.servings}` : ""}
+          {week
+            ? `${week.nights.length} nights · ${count} ${count === 1 ? "recipe" : "recipes"}`
+            : `${count} ${count === 1 ? "dish" : "dishes"}${meal.servings ? ` · serves ${meal.servings}` : ""}`}
         </span>
       </span>
     </motion.button>

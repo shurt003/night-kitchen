@@ -16,6 +16,7 @@ import { Spinner } from "@/components/Spinner";
 import { CyclingLine } from "@/components/CyclingLine";
 import { draftRecipe } from "@/lib/draftRecipe";
 import { MAKE_SESSION_KEY } from "@/lib/userCache";
+import { MakeWeek } from "@/components/MakeWeek";
 
 /**
  * Make: ask for a dish (or a whole meal) and get a recipe written for it.
@@ -32,6 +33,14 @@ import { MAKE_SESSION_KEY } from "@/lib/userCache";
  * shown rather than explained. A one-dish ask, a whole-meal ask, a dessert —
  * the three shapes Make answers.
  */
+/** What "Plan the week" can be asked — the rest is chosen with the chips. */
+const WEEK_EXAMPLES = [
+  "mix and match dinners, with a big tray of roasted veg to use all week",
+  "quick weeknight dinners, nothing over 30 minutes",
+  "cook once on Sunday, eat well all week",
+  "lots of vegetables, a couple of fish nights",
+];
+
 const EXAMPLES = [
   "chicken tikka masala",
   "date night: steak, a side and a dessert",
@@ -87,6 +96,8 @@ type Session = {
   answered: string | null;
   /** "19:00" once the cook says when dinner is; null until then. */
   serveTime: string | null;
+  /** Cook something, or Plan the week. */
+  mode?: "cook" | "week";
   /** A meal's name — the model's suggestion until the cook renames it. */
   mealTitle: string | null;
   /** Set once the meal is kept together in the Library. */
@@ -99,7 +110,12 @@ const SESSION_TTL = 12 * 60 * 60 * 1000;
 
 export default function MakePage() {
   const [ask, setAsk] = useState("");
+  const [mode, setMode] = useState<"cook" | "week">("cook");
   const [maxActive, setMaxActive] = useState<number | null>(null);
+  /** The scope read thought this was a week: offer to switch instead of cramming it into a meal. */
+  const [weekOffer, setWeekOffer] = useState<{ nights: number | null } | null>(null);
+  const [presetNights, setPresetNights] = useState<number | null>(null);
+  const [resetSignal, setResetSignal] = useState(0);
   const [example, setExample] = useState(0);
   const askRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -153,6 +169,7 @@ export default function MakePage() {
       setSaved(s.saved ?? []);
       setAnswered(s.answered ?? null);
       setServeTime(s.serveTime ?? null);
+      setMode(s.mode === "week" ? "week" : "cook");
       setMealTitle(s.mealTitle ?? null);
       setSavedMealId(s.savedMealId ?? null);
     } catch {
@@ -167,12 +184,12 @@ export default function MakePage() {
       return;
     }
     try {
-      const s: Session = { ask, maxActive, scope, result, saved, answered, serveTime, mealTitle, savedMealId, saved_at: Date.now() };
+      const s: Session = { ask, maxActive, scope, result, saved, answered, serveTime, mode, mealTitle, savedMealId, saved_at: Date.now() };
       localStorage.setItem(MAKE_SESSION_KEY, JSON.stringify(s));
     } catch {
       // out of quota or private mode — the page just forgets on leave
     }
-  }, [ask, maxActive, scope, result, saved, answered, serveTime, mealTitle, savedMealId]);
+  }, [ask, maxActive, scope, result, saved, answered, serveTime, mode, mealTitle, savedMealId]);
 
   /** The question as one comparable string — the chips are part of it. */
   const question = [ask.trim().toLowerCase(), maxActive ?? ""].join("|");
@@ -190,6 +207,8 @@ export default function MakePage() {
     setServeTime(null);
     setMealTitle(null);
     setSavedMealId(null);
+    setWeekOffer(null);
+    setResetSignal((n) => n + 1);
   }
 
   async function start() {
@@ -215,15 +234,27 @@ export default function MakePage() {
       if (!res.ok) throw new Error(json.error ?? "Couldn't read that.");
       const s = json.scope as MakeScope;
       setScope(s);
-      if (s.servings_in_request == null && s.standard_yield == null) {
-        setAskServings(true);
-      } else {
-        await write(s, null);
+      // Several nights of dinners don't fit one meal — offer the week instead
+      // of squeezing it in (that's how five dinners became one recipe).
+      if (s.week_shaped) {
+        setWeekOffer({ nights: s.nights_in_request });
+        return;
       }
+      await continueAsMeal(s);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't read that.");
     } finally {
       setScoping(false);
+    }
+  }
+
+  /** After the scope read: ask for servings if it needs them, else write. */
+  async function continueAsMeal(s: MakeScope) {
+    setWeekOffer(null);
+    if (s.servings_in_request == null && s.standard_yield == null) {
+      setAskServings(true);
+    } else {
+      await write(s, null);
     }
   }
 
@@ -401,19 +432,51 @@ export default function MakePage() {
 
   const allSaved = !!result && result.dishes.length > 0 && saved.length === result.dishes.length && saved.every(Boolean);
   const isMeal = !!result && result.dishes.length > 1;
+  // A batch size belongs to a single dish ("one 9×13 pan"); a meal shows its servings.
   const yieldLabel =
-    scope?.standard_yield && scope.servings_in_request == null ? scope.standard_yield.label : null;
+    !isMeal && scope?.standard_yield && scope.servings_in_request == null ? scope.standard_yield.label : null;
 
   return (
     <main className="px-4 pt-[max(env(safe-area-inset-top),16px)]">
       <h1 className="pr-11 font-display text-3xl font-bold">Make</h1>
       <p className="mt-1 text-sm text-smoke">
-        What do you want to eat? A dish or a whole meal — your{" "}
+        {mode === "cook" ? "What do you want to eat? A dish or a whole meal" : "Dinners for the nights ahead"} — your{" "}
         <Link href="/staples" className="font-semibold text-char underline underline-offset-2">
           staples
         </Link>{" "}
         will be used where they fit, and anything missing can go on the list.
       </p>
+
+      {/* Two kinds of ask, two layouts — so this one earns a control (unlike
+          the dish/meal pills, which only repeated the words). */}
+      <div className="mt-3 grid grid-cols-2 rounded-full bg-char/5 p-1" role="tablist" aria-label="What are you making?">
+        {(
+          [
+            { value: "cook", label: "Cook something" },
+            { value: "week", label: "Plan the week" },
+          ] as const
+        ).map((o) => (
+          <button
+            key={o.value}
+            role="tab"
+            aria-selected={mode === o.value}
+            onClick={() => {
+              setMode(o.value);
+              setWeekOffer(null);
+            }}
+            className="relative rounded-full py-2 text-sm font-semibold"
+          >
+            {mode === o.value && (
+              <motion.span
+                layoutId="make-mode"
+                transition={springUI}
+                className="absolute inset-0 rounded-full bg-tile shadow-sm shadow-scrim/10"
+              />
+            )}
+            <span className={`relative ${mode === o.value ? "text-char" : "text-smoke"}`}>{o.label}</span>
+          </button>
+        ))}
+      </div>
 
       {/* The example sits over the box rather than in `placeholder`, which
           can't animate — and pr-11 is reserved for the ✕ either way, so text
@@ -441,7 +504,7 @@ export default function MakePage() {
                 transition={{ duration: 0.22 }}
                 className="block"
               >
-                {EXAMPLES[example]}…
+                {(mode === "week" ? WEEK_EXAMPLES : EXAMPLES)[example % (mode === "week" ? WEEK_EXAMPLES : EXAMPLES).length]}…
               </motion.span>
             </AnimatePresence>
           </span>
@@ -461,6 +524,10 @@ export default function MakePage() {
         )}
       </div>
 
+      {mode === "week" ? (
+        <MakeWeek ask={ask} presetNights={presetNights} resetSignal={resetSignal} />
+      ) : (
+        <>
       <div className="no-scrollbar -mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1">
         {TIMES.map((t) => {
           const active = maxActive === t.max;
@@ -648,6 +715,44 @@ export default function MakePage() {
           </motion.section>
         )}
       </AnimatePresence>
+
+
+      {/* The scope read heard several nights of dinners. */}
+      <AnimatePresence>
+        {weekOffer && scope && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="mt-4 rounded-xl border border-char/10 bg-surface p-4"
+          >
+            <p className="font-display text-base font-bold">This sounds like a week of dinners.</p>
+            <p className="mt-0.5 text-sm text-smoke">
+              Plan it as a week? Each night gets its own recipe, and you can swap any one of them.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  setPresetNights(weekOffer.nights);
+                  setWeekOffer(null);
+                  setMode("week");
+                }}
+                className="rounded-full bg-flame px-4 py-2 text-sm font-bold text-accent-ink"
+              >
+                Plan the week
+              </button>
+              <button
+                onClick={() => continueAsMeal(scope)}
+                className="rounded-full bg-char/5 px-4 py-2 text-sm font-semibold text-char"
+              >
+                No, one meal
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+        </>
+      )}
 
       {/* Writing is the one wait long enough to look like a hang, so it gets a
           modal with a way out — same as Wing it. */}

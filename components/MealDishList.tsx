@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { springSoft, springUI } from "@/lib/springs";
+import { springSoft } from "@/lib/springs";
+import { SwapPanel } from "./SwapPanel";
 
 /** A meal's dishes are labelled by their place in it, not the library's course pills. */
 export const MEAL_ROLE: Record<string, string> = {
@@ -21,9 +22,6 @@ export function formatMinutes(min: number): string {
   const m = min % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
 }
-
-/** One tap fills the hint; "Surprise me" leaves it empty on purpose. */
-const SWAP_HINTS = ["Something lighter", "No oven", "Quicker", "Surprise me"];
 
 type Dish = {
   title: string;
@@ -51,16 +49,14 @@ export function MealDishList({
   onSwap?: (i: number, hint: string) => void;
 }) {
   const [swapAt, setSwapAt] = useState<number | null>(null);
-  const [hint, setHint] = useState("");
 
   function openSwap(i: number) {
     setSwapAt((cur) => (cur === i ? null : i));
-    setHint("");
   }
 
-  function go(i: number, h: string) {
+  function go(i: number, hint: string) {
     setSwapAt(null);
-    onSwap?.(i, h === "Surprise me" ? "" : h.trim());
+    onSwap?.(i, hint);
   }
 
   return (
@@ -118,54 +114,7 @@ export function MealDishList({
             </div>
 
             <AnimatePresence initial={false}>
-              {swapAt === i && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={springUI}
-                  className="overflow-hidden"
-                >
-                  <div className="border-t border-char/10 p-3">
-                    <p className="text-sm font-semibold">
-                      Swap the {role ? role.toLowerCase() : "dish"} for…
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {SWAP_HINTS.map((h) => (
-                        <button
-                          key={h}
-                          onClick={() => go(i, h)}
-                          className="rounded-full bg-char/5 px-3 py-1.5 text-xs font-medium text-smoke"
-                        >
-                          {h}
-                        </button>
-                      ))}
-                    </div>
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        if (hint.trim()) go(i, hint);
-                      }}
-                      className="mt-2 flex gap-2"
-                    >
-                      <input
-                        value={hint}
-                        onChange={(e) => setHint(e.target.value.slice(0, 200))}
-                        placeholder="or say what you'd like…"
-                        aria-label="What would you like instead?"
-                        className="min-w-0 flex-1 rounded-full border border-char/15 bg-tile px-3.5 py-2 text-base outline-none focus:border-flame"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!hint.trim()}
-                        className="shrink-0 rounded-full bg-flame px-4 text-sm font-bold text-accent-ink disabled:opacity-40"
-                      >
-                        Swap
-                      </button>
-                    </form>
-                  </div>
-                </motion.div>
-              )}
+              {swapAt === i && <SwapPanel what={role ? role.toLowerCase() : "dish"} onSwap={(h) => go(i, h)} />}
             </AnimatePresence>
           </motion.li>
         );

@@ -133,19 +133,30 @@ export const InventPitchesSchema = z.object({
 });
 
 /** Make, step one: the shape of the request, and whether servings need asking. */
-export const MakeScopeSchema = z.object({
+export const MakeScopeSchema = z
+  .object({
   kind: z.enum(["dish", "meal"]).catch("dish"),
+  // Empty is allowed only for a week-shaped ask (checked below) — there's no
+  // single meal to list. More than four is trimmed rather than refused.
   dishes: z
     .array(z.object({ title: z.string(), course: z.enum(COURSES).catch("misc").default("misc") }))
-    .min(1)
-    .max(4),
+    .default([])
+    .transform((d) => d.slice(0, 4)),
   servings_in_request: z.number().int().positive().nullable().default(null),
+  // A batch with no number ("one big pot", servings null) can't be cooked
+  // for, so it drops to null and the cook is asked for servings instead of
+  // the whole read failing.
   standard_yield: z
     .object({ servings: z.number().int().positive(), label: z.string() })
     .nullable()
+    .catch(null)
     .default(null),
   not_food: z.boolean().default(false),
-});
+  /** Dinners across several nights — better as Plan the week than one meal. */
+  week_shaped: z.boolean().catch(false).default(false),
+  nights_in_request: z.number().int().positive().nullable().catch(null).default(null),
+  })
+  .refine((v) => v.week_shaped || v.dishes.length > 0, { message: "No dishes", path: ["dishes"] });
 export type MakeScope = z.infer<typeof MakeScopeSchema>;
 
 /**
@@ -171,6 +182,46 @@ export type MakeResult = z.infer<typeof MakeRecipeSchema>;
 export const MakeSwapSchema = z.object({
   dish: ExtractionSchema,
   game_plan: GamePlanSchema,
+});
+
+/** Plan the week, step one: the outline every recipe is then written against. */
+export const WeekOutlineSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  components: z
+    .array(
+      z.object({
+        key: z.string().trim().min(1),
+        title: z.string().trim().min(1),
+        makes: z.string().default(""),
+        used_on: z.array(z.number().int().positive()).default([]),
+      })
+    )
+    .max(5)
+    .default([]),
+  nights: z
+    .array(
+      z.object({
+        night: z.number().int().positive(),
+        label: z.string().default(""),
+        title: z.string().trim().min(1),
+        hook: z.string().default(""),
+        uses: z.array(z.string()).default([]),
+        tonight_min: z.number().int().nonnegative().nullable().catch(null).default(null),
+        kind: z.enum(["cook", "remix", "reheat"]).catch("cook").default("cook"),
+        from_night: z.number().int().positive().nullable().catch(null).default(null),
+      })
+    )
+    .min(1)
+    .max(7),
+  prep_plan: GamePlanSchema,
+  /** The prep day the cook chose ("Sun"), set by the route — not the model. */
+  prep_day: z.enum(["Sat", "Sun"]).nullable().catch(null).default(null),
+});
+
+/** Swapping one night of a week: its new outline entry and (unless it's a reheat) its recipe. */
+export const WeekSwapSchema = z.object({
+  night: WeekOutlineSchema.shape.nights.element,
+  recipe: ExtractionSchema.nullable().default(null),
 });
 
 export const SubstituteSchema = z.object({

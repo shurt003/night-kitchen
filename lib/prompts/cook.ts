@@ -1,3 +1,5 @@
+import { MADE_AHEAD_SECTION } from "../config";
+
 export const PANTRY_SYSTEM = `You rank what someone can cook right now from what they have on hand.
 
 You are given "on_hand" (what they said they have), "staples" (things they always keep stocked — treat these as available even if unmentioned), and "recipes" (a compact index).
@@ -222,6 +224,8 @@ Decide:
 - "servings_in_request": the number of people or servings if their words say it ("for 6", "two of us", "a dozen"), else null.
 - "standard_yield": when the dish has a natural batch size that has nothing to do with headcount — baked goods and anything defined by its pan, loaf, tray or pot: brownies, cookies, cakes, pies, bread, muffins, meatloaf, lasagna, a casserole, a big pot of chili or soup, a batch of sauce or dressing. Give { "servings": how many it serves or makes, "label": a short phrase like "one 9×13 pan, about 16 brownies" }. Null for anything portioned per person — a steak, a pasta dish, a curry, a stir-fry, a salad for the table. A meal is portioned per person: null, unless every dish in it is batch-sized.
 - "not_food": true only if this isn't something anyone could cook or make in a kitchen.
+- "week_shaped": true when they want dinners across several nights — "dinners for the week", "the next 5 nights", "meal prep for Monday to Friday", "something that lasts two nights and then something else". One meal eaten once is not week-shaped, even a big one. When true, still fill the other fields as best you can.
+- "nights_in_request": how many nights they mean, if they said ("next 7 nights" → 7, "the work week" → 5), else null.
 
 Respond with ONLY JSON:
 {
@@ -229,12 +233,16 @@ Respond with ONLY JSON:
   "dishes": [ { "title": "Chicken tikka masala", "course": "meals" } ],
   "servings_in_request": null,
   "standard_yield": null,
-  "not_food": false
+  "not_food": false,
+  "week_shaped": false,
+  "nights_in_request": null
 }`;
 
 /** How each Make dish is written — shared by the first write and a swap. */
-const MAKE_DISH_RULES = `- Quantities for "servings", and set each dish's "servings" to that number. When "yield_label" is given, write for that batch instead and say it in the description ("Makes one 9×13 pan, about 16 brownies").
-- Use their staples where they genuinely fit — that's what they keep in for — but call for anything the dish needs. Don't bend a dish out of shape to avoid a shop.
+const MAKE_SERVINGS_RULE = `- Quantities for "servings", and set each dish's "servings" to that number. When "yield_label" is given, write for that batch instead and say it in the description ("Makes one 9×13 pan, about 16 brownies").`;
+
+/** Everything about writing a dish except how many it's for. */
+const MAKE_DISH_CRAFT = `- Use their staples where they genuinely fit — that's what they keep in for — but call for anything the dish needs. Don't bend a dish out of shape to avoid a shop.
 - If "max_active_min" is set, keep hands-on time inside it — for a meal, the cook's total hands-on time across all dishes. Unattended time doesn't count.
 - Be honest about "time_total_min" and "time_active_min".
 - Ingredients: "raw" is the full line as a person would read it ("2 tbsp soy sauce"); the other fields break that same line apart. Use "section" only when the recipe genuinely has parts ("For the sauce").
@@ -243,6 +251,9 @@ const MAKE_DISH_RULES = `- Quantities for "servings", and set each dish's "servi
 - "timer_seconds" only where a step is genuinely timed and unattended. Null everywhere else.
 - "course" is "meals" (a main), "appetizers", "sides", "desserts", "drinks", or "misc".
 - Nobody has cooked this yet. Put anything you're unsure about in "gaps" — a time that depends on their oven, a substitution you're guessing at.`;
+
+const MAKE_DISH_RULES = `${MAKE_SERVINGS_RULE}
+${MAKE_DISH_CRAFT}`;
 
 /**
  * The game plan is structured so the page can turn "4 hours before" into
@@ -292,6 +303,7 @@ You are given "request" (their words), "kind" ("dish" or "meal"), "dishes" (what
 
 Rules:
 - Write what they asked for. If they named a known dish, write an excellent, faithful version of it — not a twist — unless they asked for a twist. Write it in your own words; never reproduce a published recipe's text.
+- Every dish is its own recipe. Never fold several separate dinners or dishes into one recipe with a section each — if the request is really several dinners across the week, still write only what "dishes" lists, one recipe each.
 - A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then write the game plan (below), and give the meal a short, plain name in "meal_title" — what you'd call it to a friend ("Short rib dinner", "Taco night"), not a menu flourish. For a single dish, both are null.
 ${MAKE_DISH_RULES}
 
@@ -333,4 +345,84 @@ Respond with ONLY JSON:
 {
   "dish": ${MAKE_DISH_JSON},
   "game_plan": ${MAKE_GAME_PLAN_JSON}
+}`;
+
+
+// ---------------------------------------------------------------------------
+// Plan the week
+// ---------------------------------------------------------------------------
+
+/**
+ * Plan the week, step one: the shape of the whole week before any recipe is
+ * written — what's cooked in bulk, what each night is, and how leftovers
+ * travel. Every recipe is then written against this, in parallel.
+ */
+export const WEEK_OUTLINE_SYSTEM = `You plan someone's dinners for the coming nights. Shopping is fine — they'll do one shop for the whole stretch. Plan only; recipes are written afterwards, one per item, against your plan.
+
+You are given "request" (their words), "nights" (how many dinners), "night_labels" (the weekday each night falls on, in order), "people" (how many each dinner feeds), "prep_day" (a day they'll cook in bulk — the first night's day — or null), and "staples" (things they always keep in).
+
+Plan:
+- One dinner per night, exactly "nights" of them, labelled with "night_labels" in order. Real variety across the stretch — different cuisines, proteins and textures, not one dish five ways — unless they asked otherwise.
+- "components": things cooked in bulk once and used on several nights — a tray of roasted vegetables, a pot of grains, a sauce, a batch of protein. 0–4 of them, only where they genuinely save work; follow the request when it names one ("a tray of veggies"). Each gets a short "key" ("c1", "c2"), a "title", what the batch "makes" ("2 sheet pans, about 8 cups"), and "used_on" (the night numbers that use it). A component used on only one night isn't a component — fold it into that night.
+- Cook once, eat twice: over more than 3 nights, plan at least one night that's built from an earlier night's leftovers. Prefer a "remix" (leftover braise → ragu over pasta) to a plain "reheat"; at most one plain reheat. Give such nights "kind" "remix" or "reheat" and "from_night" (the night the leftovers come from); that earlier night then cooks enough for both.
+- "tonight_min": honest hands-on minutes that night, counting components as already cooked. Keep weeknights quick — around 30 minutes or less — unless they asked for something bigger.
+- "uses": the component keys a night draws on.
+- "hook": one plain line on what it is and why it works ("Charred veg tray, a jammy egg and chili crisp over rice").
+- "prep_plan": the bulk-cooking session in order — what goes in the oven first, what happens while it roasts, how to cool and store — 3–7 steps, each { "offset_min": null, "label": short timing in words ("Start", "While that roasts", "To finish"), "text" }. Null when there are no components.
+- "title": a plain name for the stretch ("Veggie-tray week").
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON:
+{
+  "title": "Veggie-tray week",
+  "components": [ { "key": "c1", "title": "Roasted vegetable tray", "makes": "2 sheet pans, about 8 cups", "used_on": [1, 3, 4] } ],
+  "nights": [
+    { "night": 1, "label": "Sun", "title": "Soy-ginger chicken thighs with rice", "hook": "...", "uses": ["c1"], "tonight_min": 25, "kind": "cook", "from_night": null }
+  ],
+  "prep_plan": [ { "offset_min": null, "label": "Start", "text": "Heat the oven to 425°F and..." } ]
+}`;
+
+/** Plan the week, step two: one recipe — a bulk component, or one night's dinner. */
+export const WEEK_RECIPE_SYSTEM = `You write one recipe that's part of a planned week of dinners. Shopping is fine — they do one shop for the whole stretch.
+
+You are given "request" (their original words), "outline" (the whole week's plan), "people", "staples", and "write": either { "component": key } — a bulk item cooked once for several nights — or { "night": number } — one night's dinner.
+
+A component:
+- Write the batch exactly as the outline describes it, big enough for every night in its "used_on" at "people" each. Set "servings" to the number of portions it makes.
+- Season it so it suits every night that uses it, and say how to cool and store it, and for how long, at the end of the steps.
+
+A night:
+- Write that dinner for "people", and set "servings" to "people". If a later night is a "remix" or "reheat" of this one, cook enough for both and say so in the description.
+- Components it "uses" are already cooked. List each one as an ingredient in the section "${MADE_AHEAD_SECTION}" with how much this dinner takes ("2 cups roasted vegetables") — never their raw ingredients, which were bought for the component.
+- A "remix" night builds on the leftovers of "from_night": list them in "${MADE_AHEAD_SECTION}" too, and only buy what's new.
+- Steps cover only tonight's cooking. Keep hands-on time close to the outline's "tonight_min".
+${MAKE_DISH_CRAFT}
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON — one recipe:
+${MAKE_DISH_JSON}`;
+
+/**
+ * Plan the week, swapping one night: a different dinner in the same slot that
+ * still fits the week (its components, the leftovers plan), plus its recipe.
+ */
+export const WEEK_SWAP_SYSTEM = `You're replacing one night's dinner in someone's planned week. Shopping is fine.
+
+You are given "request" (their original words), "outline" (the whole week's plan), "replace" (the night number to swap), "hint" (what they'd like instead — may be empty), "people", and "staples".
+
+Rules:
+- Plan a genuinely different dinner for that night — not a variation of the one it replaces — and different from every other night in the week.
+- Follow the hint when there is one ("something lighter", "no oven", a specific dish). With no hint, pick what suits the week best.
+- It may use the week's existing components (by key) but cannot add new ones. If another night is a "remix" or "reheat" of the night being replaced, keep the new dinner cookable in a quantity that still feeds that night, and say so.
+- Return the new outline entry for that night ("night" and "label" unchanged) as "night", and — unless its "kind" is "reheat" — its full recipe as "recipe", written exactly as a night's recipe is: for "people", components listed in the section "${MADE_AHEAD_SECTION}", only tonight's steps.
+${MAKE_DISH_CRAFT}
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON:
+{
+  "night": { "night": 3, "label": "Tue", "title": "...", "hook": "...", "uses": ["c1"], "tonight_min": 20, "kind": "cook", "from_night": null },
+  "recipe": ${MAKE_DISH_JSON}
 }`;

@@ -256,35 +256,95 @@ meal kept together, viewable like the Make page, plus two extras. Decisions:
   "and its recipes", check all are gone, then undo and check everything is
   back, photos included.
 
-### Phase 2.6: Multi-night plans (owner's idea, 2026-10-24)
+### Phase 2.6: Plan the week (owner's decisions, 2026-10-24)
 
-"Dinners for the next 5 nights for two", "cook once on Sunday, eat three
-nights", "short ribs that work for two nights". The owner said to treat the
-Plan page as if it doesn't exist for this: it lives entirely in Make and
-saves under the Library's "Meals" toggle (name kept as "Meals"). To be
-planned in detail before building; the shape so far:
+**Why:** asked for "dinners for every night for the next 7 nights … bulk
+cooking a tray of veggies", Make (which only knows one dish or one meal of
+2–4 dishes) squeezed the week into one "meal": a veg tray plus a single
+recipe "Dinner proteins and grains (7 days)" holding five dinners as
+sections, serving 14. Swap could only replace all five at once. The owner
+loved the content and wants a layout built for a week. Treat the Plan page as
+if it doesn't exist; this lives entirely in Make and the Library.
 
-- **Outline first, recipes second.** A quick outline (~20s): one line per
-  night (dish, or "leftover ribs → ragu over pappardelle"), a shared prep
-  session ("Sunday, 90 min: braise the ribs, cook the rice, make the sauce"),
-  and ingredient overlap ("one bunch of cilantro covers Mon and Thu"). Swap
-  any night here, cheaply, before anything is written. Then **"Write it
-  all"** writes every recipe in parallel (~30s total, not 3+ min in one call
-  that could hit the time limit).
-- **Cook once, eat twice:** the cook is scaled to cover both nights; night two
-  is the dish reheated or remixed, with storage and reheating notes.
-- **One grocery list** for the whole stretch, de-duplicated.
-- **Named** like every saved meal; the Library card reads "5 nights · 7
-  recipes".
-- Storage is ready from `012` (`kind = 'nights'`, per-night rows).
-- **Open idea (owner, 2026-10-24, to revisit):** write recipes only when a
-  night is tapped, like Wing it, instead of "Write it all" up front. Agreed
-  shape if adopted: the outline carries each night's ingredients and a
-  combined shopping list (so one shop works before any recipe exists); a
-  night's recipe is written against the outline's ingredients and prep plan
-  as constraints; written nights are kept; a "Write all" button for prep
-  day; unwritten nights save as cards. Main win is speed (a recipe costs
-  ~2–3¢, a week ~10–15¢ up front).
+**Decisions:**
+- A switch at the top of Make: **Cook something | Plan the week**. (Unlike
+  the dropped dish/meal pills, it changes the whole layout, so it earns a
+  control.)
+- Week options are **quick taps**, not typing: **Nights** (3–7, default 5),
+  **People** (1, 2, 3, 4, 6; default 2), **Prep day** (None, Sat, Sun;
+  default None). The text box still takes the rest in their words ("mix and
+  match, bulk-roast a tray of veggies").
+- **Everything is written before it's shown**, as Make works today (the owner
+  declined writing recipes on tap). One wait with progress, then the whole
+  week.
+
+**How it's generated.** A week (prep components + each night, ~9–12
+recipes) is too much for one model call, so it's two steps behind one wait:
+1. **Outline** (~20s, smart model): prep components (`title`, what it makes,
+   which nights use it), nights (`label`, dinner `title`, one-line hook, which
+   components it uses, minutes of cooking that night, and whether it's a
+   leftover/remix night), and the prep-day schedule (game-plan steps).
+2. **Write everything in parallel** (~30–40s): one call per prep component and
+   per night, each given the outline as constraints (what's cooked on prep
+   day, what's left over from which night) so the recipes agree with each
+   other and with one shop. Concurrency capped at ~4 at a time. A night
+   that's purely "reheat Monday's" gets a short note, not a full recipe.
+   Progress: "Writing 6 of 9…". Cancel stops everything.
+
+**Layout:**
+- **Prep day card** (when there is one, or when the outline has bulk
+  components): its schedule as a game plan, and each component as its own
+  small recipe (open, swap).
+- **One card per night**, labelled by weekday: the dinner, "uses: veg tray,
+  rice", "15 min tonight", leftover/remix nights marked. **Swap works per
+  night**: swapping Wednesday's chickpea curry rewrites only Wednesday (and
+  the prep schedule if what it uses changes).
+- **Save the week** → a saved meal with `kind = 'nights'` (schema from `012`:
+  per-night rows; prep components on night 0). **Add the week to the grocery
+  list** in one confirm step, de-duplicated.
+- Library (Meals toggle): the card reads "7 nights · 9 recipes"; opening it
+  shows the same week layout; rename and the delete sheet work the same.
+
+**Fixes to "Cook something" that ship with this:**
+- The recipe prompt must never merge separate dinners into one recipe; each
+  dish is its own recipe, so Swap always means one thing.
+- The scope read flags week-shaped requests ("dinners for the next 7
+  nights"); instead of cramming them into a meal, Make offers "This sounds
+  like a week — plan it as a week?" and switches modes with the text kept.
+- A meal's subtitle no longer borrows one dish's batch size ("one large sheet
+  pan…"); a meal shows its servings.
+
+**Open details** (decide while building, note here): which weekday night 1
+is (proposal: the prep day when set, else today); whether People and Nights
+also shape the outline's leftover strategy (proposal: yes, cook-once-eat-twice
+is used when nights > 3).
+
+**Built 2026-10-24** (not yet committed when written):
+- Routes: `/api/make/week/outline`, `/api/make/week/recipe` (one recipe per
+  call), `/api/make/week/swap`. Prompts `WEEK_OUTLINE_SYSTEM`,
+  `WEEK_RECIPE_SYSTEM`, `WEEK_SWAP_SYSTEM`; Wing it's and Make's existing
+  prompts unchanged apart from the two intended edits (scope's week flag,
+  recipe's never-merge rule).
+- Night recipes list prep components under the ingredient section
+  "Made ahead" (`MADE_AHEAD_SECTION`), which the grocery list skips: they
+  were bought for the component recipes.
+- Saved weeks: `kind = 'nights'`, the outline stored in `nights` (with
+  `prep_day`), prep components on night 0 with their key as `note`.
+- Components: `MakeWeek` (the week side of Make), `WeekView` (shared with a
+  saved week in the Library), `SwapPanel` (shared with meals).
+- Live test with the owner's 7-night request: outline 41s, 9 recipes in 62s
+  at 4 at a time (now 6), one-night swap 27s, about 38¢ for the week. Week
+  detection: "next 7 nights" → 7, "monday to friday" → 5; meals unflagged.
+- Found and fixed on the way: the scope read rejected week requests (it
+  returns no dishes for them) and any batch size without a number ("one big
+  pot" of chili), failing the whole ask.
+
+**Phone checklist (draft):** switch to Plan the week, pick 5 nights, 2
+people, Sun prep, type the veggie-tray request; check the prep card, five
+night cards with weekdays, and that swapping one night changes only that
+night; save the week, find it under Meals as "5 nights"; add the week to the
+grocery list with no duplicates; in Cook something, type "dinners for the
+next 5 nights" and check it offers to switch.
 
 ### Phase 3: Polish
 - [ ] Loading copy and motion consistent with Wing it; Stop/cancel on long

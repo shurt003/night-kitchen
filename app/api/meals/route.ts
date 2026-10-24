@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
 import { getMeal, listMeals, ownsRecipes, setMealDishes } from "@/lib/savedMeals";
+import { WeekOutlineSchema } from "@/lib/schemas";
 
 /** GET /api/meals — every saved meal, newest first, with its dishes. */
 export async function GET(req: Request) {
@@ -21,7 +22,15 @@ const MealBody = z.object({
   servings: z.number().int().positive().max(50).nullable().default(null),
   game_plan: z.array(z.unknown()).nullable().default(null),
   serve_time: z.string().regex(/^\d{2}:\d{2}$/).nullable().default(null),
-  recipe_ids: z.array(z.string().uuid()).min(1).max(8),
+  /** A single meal: its recipes in order. */
+  recipe_ids: z.array(z.string().uuid()).min(1).max(8).optional(),
+  /** A planned week: each recipe with its night (0 = prep) and note, plus the outline. */
+  dishes: z
+    .array(z.object({ recipe_id: z.string().uuid(), night: z.number().int().min(0).max(7), note: z.string().max(40).nullable().optional() }))
+    .min(1)
+    .max(16)
+    .optional(),
+  week: WeekOutlineSchema.nullable().optional(),
 });
 
 /**
@@ -35,7 +44,11 @@ export async function POST(req: Request) {
   const parsed = MealBody.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "That isn't a meal." }, { status: 400 });
   const m = parsed.data;
-  if (!(await ownsRecipes(userId, m.recipe_ids))) {
+  const isWeek = !!(m.week && m.dishes);
+  const dishes = isWeek ? m.dishes! : m.recipe_ids;
+  if (!dishes) return NextResponse.json({ error: "That isn't a meal." }, { status: 400 });
+  const ids = isWeek ? m.dishes!.map((d) => d.recipe_id) : m.recipe_ids!;
+  if (!(await ownsRecipes(userId, ids))) {
     return NextResponse.json({ error: "Save the dishes first." }, { status: 400 });
   }
 
@@ -48,14 +61,15 @@ export async function POST(req: Request) {
       servings: m.servings,
       game_plan: m.game_plan ?? [],
       serve_time: m.serve_time,
-      kind: "meal",
+      kind: isWeek ? "nights" : "meal",
+      nights: isWeek ? m.week : [],
     })
     .select("id")
     .single();
   if (error || !data) return NextResponse.json({ error: error?.message ?? "Couldn't save." }, { status: 500 });
 
   try {
-    await setMealDishes(data.id, m.recipe_ids);
+    await setMealDishes(data.id, dishes);
   } catch (e) {
     // Don't leave an empty meal behind.
     await db().from("saved_meals").delete().eq("id", data.id);

@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { normalizeName } from "./groceryShared";
+import { MADE_AHEAD_SECTION } from "./config";
 import type { Ingredient } from "./schemas";
 
 /** One line that would land on the grocery list, with its provenance intact. */
@@ -24,6 +25,8 @@ function toCandidates(
 ): Candidate[] {
   return ingredients
     .filter((ing) => (ing.item || ing.raw)?.trim())
+    // Cooked on prep day from its own recipe's shopping — never bought twice.
+    .filter((ing) => ing.section !== MADE_AHEAD_SECTION)
     .map((ing) => ({
       name: ing.item || ing.raw,
       quantity: [ing.quantity, ing.unit].filter(Boolean).join(" "),

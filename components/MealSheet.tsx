@@ -14,6 +14,8 @@ import { AddToListSheet } from "./AddToListSheet";
 import { DeleteMealSheet } from "./DeleteMealSheet";
 import { CyclingLine } from "./CyclingLine";
 import { Spinner } from "./Spinner";
+import { WeekView, type WeekSlot } from "./WeekView";
+import type { WeekNight } from "@/lib/weekPlan";
 
 const SWAP_LINES = [
   "Rethinking the plate…",
@@ -130,6 +132,66 @@ export function MealSheet({
     }
   }
 
+  const week = meal.kind === "nights" ? meal.week : null;
+  const dishFor = (night: number, note?: string) =>
+    meal.dishes.find((d) => d.night === night && (note === undefined || d.note === note))?.recipe ?? null;
+  const weekSlot = (r: Recipe | null): WeekSlot => (r ? { state: "ready", saved: true } : { state: "missing" });
+
+  /**
+   * Swap one night of a saved week: the new dinner is saved straight away and
+   * takes that night's place; the old recipe stays in the library.
+   */
+  async function swapNight(night: number, hint: string) {
+    if (!week || swapping) return;
+    const label = week.nights.find((n) => n.night === night)?.label ?? "";
+    setSwapping(`A new ${label} dinner`);
+    setError(null);
+    try {
+      const res = await fetch("/api/make/week/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request: meal.request || meal.title,
+          outline: week,
+          night,
+          hint,
+          people: meal.servings ?? 2,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't swap that night.");
+
+      let newId: string | null = null;
+      if (json.recipe) {
+        const saved = await fetch("/api/recipes/manual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipe: json.recipe }),
+        });
+        const savedJson = await saved.json();
+        if (!saved.ok) throw new Error(savedJson.error ?? "Couldn't save the new dinner.");
+        newId = (savedJson.recipe as Recipe).id;
+      }
+      const outline = {
+        ...week,
+        nights: week.nights.map((n) => (n.night === night ? (json.night as WeekNight) : n)),
+      };
+      const dishes = [
+        ...meal.dishes
+          .filter((d) => d.night !== night)
+          .map((d) => ({ recipe_id: d.recipe.id, night: d.night, note: d.note })),
+        ...(newId ? [{ recipe_id: newId, night, note: null }] : []),
+      ];
+      await patch({ week: outline, dishes });
+      window.dispatchEvent(new CustomEvent("recipe-captured"));
+      setAddedCount(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't swap that night.");
+    } finally {
+      setSwapping(null);
+    }
+  }
+
   return (
     <>
       <motion.div
@@ -149,15 +211,20 @@ export function MealSheet({
         <div className="p-5 pb-28">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <p className="font-display text-xs font-bold uppercase tracking-widest text-flame">Meal</p>
+              <p className="font-display text-xs font-bold uppercase tracking-widest text-flame">
+                {week ? "Week" : "Meal"}
+              </p>
               <EditableTitle
                 value={meal.title}
                 onChange={(title) => patch({ title }, { title })}
                 className="mt-1 font-display text-2xl font-bold leading-tight"
               />
               <p className="mt-1 text-sm text-smoke">
-                {meal.dishes.length} {meal.dishes.length === 1 ? "dish" : "dishes"}
-                {meal.servings ? ` · serves ${meal.servings}` : ""}
+                {week
+                  ? `${week.nights.length} nights${meal.servings ? ` · ${meal.servings} ${meal.servings === 1 ? "person" : "people"}` : ""}`
+                  : `${meal.dishes.length} ${meal.dishes.length === 1 ? "dish" : "dishes"}${
+                      meal.servings ? ` · serves ${meal.servings}` : ""
+                    }`}
               </p>
             </div>
             <button
@@ -173,21 +240,41 @@ export function MealSheet({
 
           {error && <p className="mt-3 text-sm text-flame">{error}</p>}
 
-          <div className="mt-4">
-            <MealDishList
-              dishes={meal.dishes.map((d) => ({
-                title: d.recipe.title,
-                course: d.recipe.course ?? "misc",
-                description: d.recipe.description ?? "",
-                time_active_min: d.recipe.time_active_min,
-                time_total_min: d.recipe.time_total_min,
-              }))}
-              onOpen={(i) => meal.dishes[i] && onOpenRecipe(meal.dishes[i].recipe)}
-              onSwap={meal.dishes.length > 1 ? swap : undefined}
-            />
-          </div>
+          {week ? (
+            <div className="mt-4">
+              <WeekView
+                outline={week}
+                prepDay={week.prep_day ?? null}
+                componentSlot={(k) => weekSlot(dishFor(0, k))}
+                nightSlot={(n) => weekSlot(dishFor(n))}
+                onOpenComponent={(k) => {
+                  const r = dishFor(0, k);
+                  if (r) onOpenRecipe(r);
+                }}
+                onOpenNight={(n) => {
+                  const r = dishFor(n);
+                  if (r) onOpenRecipe(r);
+                }}
+                onSwapNight={swapNight}
+              />
+            </div>
+          ) : (
+            <div className="mt-4">
+              <MealDishList
+                dishes={meal.dishes.map((d) => ({
+                  title: d.recipe.title,
+                  course: d.recipe.course ?? "misc",
+                  description: d.recipe.description ?? "",
+                  time_active_min: d.recipe.time_active_min,
+                  time_total_min: d.recipe.time_total_min,
+                }))}
+                onOpen={(i) => meal.dishes[i] && onOpenRecipe(meal.dishes[i].recipe)}
+                onSwap={meal.dishes.length > 1 ? swap : undefined}
+              />
+            </div>
+          )}
 
-          {meal.game_plan && meal.game_plan.length > 0 && (
+          {!week && meal.game_plan && meal.game_plan.length > 0 && (
             <div className="mt-4">
               <GamePlan
                 steps={meal.game_plan}

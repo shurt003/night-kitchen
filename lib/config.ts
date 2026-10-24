@@ -29,6 +29,13 @@ export const COURSE_LABELS: Record<Course, string> = {
   misc: "Misc",
 };
 
+/**
+ * The ingredient section a week's night recipes use for things cooked on prep
+ * day ("2 cups roasted veg"). They're shown like any ingredient but never go to
+ * the grocery list — they were bought for, and cooked in, the prep recipes.
+ */
+export const MADE_AHEAD_SECTION = "Made ahead";
+
 export const GROCERY_SECTIONS = [
   "produce",
   "meat_fish",
