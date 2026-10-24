@@ -359,7 +359,8 @@ Respond with ONLY JSON:
  */
 const WEEK_PROTEIN_RULES = `Protein and freshness:
 - With prep days: every meat, poultry and fish is cooked on a prep day, and each prep day feeds every night up to the next prep day. A night's protein comes from the most recent prep day on or before it — "protein_from" is that day. Never plan raw meat, poultry or fish to be bought and cooked on a night that isn't a prep day.
-- Cooked meat keeps about 4 days: everything a prep day cooks is eaten within 3 days after it. When a prep day covers several nights, cook enough for all of them — two proteins on one prep day is fine for variety.
+- One main protein per prep day, cooked in bulk, and every night that prep day covers is built on it — a different dish each night (roasted thighs with rice, then tacos, then fried rice), so the variety comes from the dishes, not from cooking a second protein. If they named proteins, give each its own prep day, in the order they named them ("chicken thighs and ground beef" with Sunday and Wednesday: chicken on Sunday, beef on Wednesday) unless their words say otherwise. Cook two proteins on one prep day only if they ask for it.
+- Cooked meat keeps about 4 days: everything a prep day cooks is eaten within 3 days after it. Cook enough for every night it covers.
 - Fish and seafood don't keep once cooked: only on a prep day's own night.
 - Without prep days: assume one shop just before night 1. Raw meat, poultry and fish keep 1–2 days in the fridge, so plan them for the first two or three nights; later nights lean on leftovers, eggs, beans, frozen or cured things. "protein_from" is null.
 - A meat-free night is fine; its "protein" is what carries it ("chickpeas", "eggs"), with "protein_from" null unless it's cooked on a prep day.
