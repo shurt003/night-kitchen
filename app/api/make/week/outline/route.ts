@@ -6,7 +6,7 @@ import { askJson } from "@/lib/anthropic";
 import { currentUserId } from "@/lib/auth";
 import { WeekOutlineSchema } from "@/lib/schemas";
 import { WEEK_OUTLINE_SYSTEM } from "@/lib/prompts/cook";
-import { nightLabels } from "@/lib/weekPlan";
+import { DAY_NAMES, nightLabels } from "@/lib/weekPlan";
 
 export const maxDuration = 300;
 
@@ -14,7 +14,8 @@ const Body = z.object({
   request: z.string().trim().min(1).max(500),
   nights: z.number().int().min(3).max(7),
   people: z.number().int().min(1).max(12),
-  prep_day: z.enum(["Sat", "Sun"]).nullable().default(null),
+  /** Any days of the week; none means bulk items cook on the first night. */
+  prep_days: z.array(z.enum(DAY_NAMES)).max(7).default([]),
   /** The cook's local weekday (0 = Sunday), so labels match their week, not the server's. */
   today_dow: z.number().int().min(0).max(6).nullable().default(null),
 });
@@ -30,11 +31,15 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return NextResponse.json({ error: "Tell me about the week." }, { status: 400 });
-  const { request, nights, people, prep_day, today_dow } = parsed.data;
+  const { request, nights, people, today_dow } = parsed.data;
 
   const today = new Date();
   if (today_dow !== null) today.setDate(today.getDate() + ((today_dow - today.getDay() + 7) % 7));
-  const labels = nightLabels(nights, prep_day, today);
+  const labels = nightLabels(nights, parsed.data.prep_days, today);
+  // A prep day outside the stretch (Wednesday, in a 3-night week starting
+  // Sunday) can't be cooked on — keep only the ones that fall inside it, in
+  // week order.
+  const prepDays = labels.filter((l) => (parsed.data.prep_days as string[]).includes(l)).filter((l, i, a) => a.indexOf(l) === i);
 
   const { data: staples } = await db().from("staples").select("name").eq("user_id", userId).eq("active", true);
 
@@ -48,7 +53,7 @@ export async function POST(req: Request) {
       nights,
       night_labels: labels,
       people,
-      prep_day,
+      prep_days: prepDays,
       staples: (staples ?? []).map((s) => s.name),
     }),
     schema: WeekOutlineSchema,
@@ -70,5 +75,25 @@ export async function POST(req: Request) {
   if (fixedNights.length < nights) {
     return NextResponse.json({ error: "That plan came back short — try again." }, { status: 502 });
   }
-  return NextResponse.json({ outline: { ...outline, nights: fixedNights, prep_day }, labels });
+  // Components cook on a chosen prep day (the first, if the model named
+  // another); sessions only for chosen days.
+  const components = outline.components.map((c) => ({
+    ...c,
+    prep_day: prepDays.length ? (c.prep_day && prepDays.includes(c.prep_day) ? c.prep_day : prepDays[0]) : null,
+  }));
+  const sessions = outline.prep_sessions
+    .filter((s) => s.plan.length)
+    .map((s) => ({ ...s, day: prepDays.length ? (s.day && prepDays.includes(s.day) ? s.day : prepDays[0]) : null }));
+  return NextResponse.json({
+    outline: {
+      ...outline,
+      components,
+      nights: fixedNights,
+      prep_sessions: sessions,
+      prep_days: prepDays,
+      prep_plan: null,
+      prep_day: null,
+    },
+    labels,
+  });
 }

@@ -8,13 +8,7 @@ import type { Extraction } from "@/lib/schemas";
 import { springUI } from "@/lib/springs";
 import { draftRecipe } from "@/lib/draftRecipe";
 import { MAKE_WEEK_SESSION_KEY } from "@/lib/userCache";
-import {
-  WEEK_NIGHT_CHOICES,
-  WEEK_PEOPLE_CHOICES,
-  WEEK_PREP_DAYS,
-  type PrepDay,
-  type WeekOutline,
-} from "@/lib/weekPlan";
+import { DAY_NAMES, WEEK_NIGHT_CHOICES, WEEK_PEOPLE_CHOICES, type WeekOutline } from "@/lib/weekPlan";
 import { RecipeDetail } from "./RecipeDetail";
 import { AddToListSheet } from "./AddToListSheet";
 import { EditableTitle } from "./EditableTitle";
@@ -35,7 +29,7 @@ type Written = Extraction | "failed";
 type Week = {
   request: string;
   people: number;
-  prepDay: PrepDay;
+  prepDays: string[];
   outline: WeekOutline;
   recipes: Record<string, Written>;
 };
@@ -76,7 +70,8 @@ export function MakeWeek({
 }) {
   const [nights, setNights] = useState<number>(5);
   const [people, setPeople] = useState<number>(2);
-  const [prepDay, setPrepDay] = useState<PrepDay>(null);
+  /** Any days; empty is "None". */
+  const [prepDays, setPrepDays] = useState<string[]>([]);
   const [week, setWeek] = useState<Week | null>(null);
   const [saved, setSaved] = useState<Record<string, Recipe>>({});
   const [title, setTitle] = useState<string | null>(null);
@@ -92,6 +87,8 @@ export function MakeWeek({
   const [savingRef, setSavingRef] = useState<string | null>(null);
   const [savingWeek, setSavingWeek] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** The recipes the confirm sheet adds — set when it opens. */
+  const [addIds, setAddIds] = useState<string[]>([]);
   const [addedCount, setAddedCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -109,7 +106,8 @@ export function MakeWeek({
       if (!s.saved_at || Date.now() - s.saved_at > SESSION_TTL) return;
       setNights(s.nights ?? 5);
       setPeople(s.people ?? 2);
-      setPrepDay(s.prepDay ?? null);
+      // An older session held one prep day.
+      setPrepDays(Array.isArray(s.prepDays) ? s.prepDays : s.prepDay ? [s.prepDay] : []);
       setWeek(s.week ?? null);
       setSaved(s.saved ?? {});
       setTitle(s.title ?? null);
@@ -126,12 +124,12 @@ export function MakeWeek({
     try {
       localStorage.setItem(
         MAKE_WEEK_SESSION_KEY,
-        JSON.stringify({ nights, people, prepDay, week, saved, title, mealId, saved_at: Date.now() })
+        JSON.stringify({ nights, people, prepDays, week, saved, title, mealId, saved_at: Date.now() })
       );
     } catch {
       // out of quota or private mode — the page just forgets on leave
     }
-  }, [nights, people, prepDay, week, saved, title, mealId]);
+  }, [nights, people, prepDays, week, saved, title, mealId]);
 
   const firstReset = useRef(true);
   useEffect(() => {
@@ -174,12 +172,12 @@ export function MakeWeek({
       const res = await fetch("/api/make/week/outline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request: ask, nights, people, prep_day: prepDay, today_dow: new Date().getDay() }),
+        body: JSON.stringify({ request: ask, nights, people, prep_days: prepDays, today_dow: new Date().getDay() }),
         signal: controller.signal,
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Couldn't plan that week.");
-      const draft: Week = { request: ask.trim(), people, prepDay, outline: json.outline, recipes: {} };
+      const draft: Week = { request: ask.trim(), people, prepDays, outline: json.outline, recipes: {} };
 
       // Every recipe at once (a few at a time), each against the outline.
       const jobs = jobsFor(draft.outline);
@@ -289,18 +287,21 @@ export function MakeWeek({
     return row;
   }
 
-  /** Save every written recipe, then keep the week together in the Library. */
-  async function saveWeek() {
-    if (!week || savingWeek) return;
+  /**
+   * Save every written recipe, then keep the week together in the Library.
+   * Resolves the week's recipe ids, or null if anything didn't save.
+   */
+  async function saveWeek(): Promise<string[] | null> {
+    if (!week || savingWeek) return null;
     setSavingWeek(true);
     setError(null);
-    const rows: Record<string, Recipe> = { ...saved };
+    const rows: Record<string, Recipe> = {};
     for (const job of jobsFor(week.outline)) {
       if (week.recipes[job.ref] === "failed" || !week.recipes[job.ref]) continue;
-      const row = rows[job.ref] ?? (await saveOne(job.ref));
+      const row = saved[job.ref] ?? (await saveOne(job.ref));
       if (!row) {
         setSavingWeek(false);
-        return;
+        return null;
       }
       rows[job.ref] = row;
     }
@@ -313,7 +314,8 @@ export function MakeWeek({
       title: (title ?? "").trim() || week.outline.title,
       request: week.request,
       servings: week.people,
-      game_plan: week.outline.prep_plan,
+      // The prep sessions live in the outline (one per prep day).
+      game_plan: null,
       week: week.outline,
       dishes,
     };
@@ -323,9 +325,27 @@ export function MakeWeek({
       body: JSON.stringify(mealId ? { ...body, request: undefined } : body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!res.ok) setError(json.error ?? "The recipes saved, but the week didn't — try again.");
-    else setMealId(json.meal.id);
     setSavingWeek(false);
+    if (!res.ok) {
+      setError(json.error ?? "The recipes saved, but the week didn't — try again.");
+      return null;
+    }
+    setMealId(json.meal.id);
+    return Object.values(rows).map((r) => r.id);
+  }
+
+  /**
+   * The master button: everything the week needs, onto the list in one
+   * confirm step. A week has to be saved for its ingredients to reach the list,
+   * so an unsaved one is saved first — same tap.
+   */
+  async function addEverything() {
+    if (!week || savingWeek) return;
+    const ids = allSaved ? writtenRefs.map((r) => saved[r].id) : await saveWeek();
+    if (ids?.length) {
+      setAddIds(ids);
+      setAddOpen(true);
+    }
   }
 
   function slot(ref: string): WeekSlot {
@@ -355,10 +375,22 @@ export function MakeWeek({
           </Chip>
         ))}
       </OptionRow>
-      <OptionRow label="Prep day">
-        {WEEK_PREP_DAYS.map((d) => (
-          <Chip key={d ?? "none"} active={prepDay === d} onClick={() => setPrepDay(d)}>
-            {d ?? "None"}
+      {/* Pick any days — two prep days split the week's bulk cooking. */}
+      <OptionRow label="Prep days" wrap>
+        <Chip active={prepDays.length === 0} onClick={() => setPrepDays([])}>
+          None
+        </Chip>
+        {DAY_NAMES.map((d) => (
+          <Chip
+            key={d}
+            active={prepDays.includes(d)}
+            onClick={() =>
+              setPrepDays((cur) =>
+                cur.includes(d) ? cur.filter((x) => x !== d) : DAY_NAMES.filter((x) => x === d || cur.includes(x))
+              )
+            }
+          >
+            {d}
           </Chip>
         ))}
       </OptionRow>
@@ -395,10 +427,26 @@ export function MakeWeek({
             {week.outline.nights.length} nights · {week.people} {week.people === 1 ? "person" : "people"}
           </p>
 
-          <div className="mt-3">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            transition={springUI}
+            onClick={addEverything}
+            disabled={savingWeek}
+            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3 font-display font-bold disabled:opacity-60 ${
+              addedCount ? "bg-herb text-chalk" : "bg-flame text-accent-ink"
+            }`}
+          >
+            {savingWeek && <Spinner className="h-4 w-4" />}
+            {savingWeek
+              ? "Saving the week…"
+              : addedCount
+                ? `✓ ${addedCount} on the list`
+                : "Add everything to grocery list"}
+          </motion.button>
+
+          <div className="mt-4">
             <WeekView
               outline={week.outline}
-              prepDay={week.prepDay}
               componentSlot={(k) => slot(`c:${k}`)}
               nightSlot={(n) => slot(`n:${n}`)}
               onOpenComponent={(k) => setSheet(`c:${k}`)}
@@ -421,28 +469,13 @@ export function MakeWeek({
                 {savingWeek ? "Saving…" : mealId ? "Save the changes" : "Save the week"}
               </motion.button>
             )}
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              transition={springUI}
-              onClick={() => setAddOpen(true)}
-              disabled={!allSaved}
-              className={`w-full rounded-xl py-3 font-display font-bold disabled:opacity-40 ${
-                addedCount ? "bg-herb text-chalk" : "border border-char/15 text-char"
-              }`}
-            >
-              {addedCount ? `✓ ${addedCount} on the list` : "Add the week to grocery list"}
-            </motion.button>
-            {!allSaved ? (
-              <p className="text-center text-xs text-smoke">Save the week first, then add it to the list.</p>
-            ) : (
-              mealId && (
-                <p className="text-center text-xs text-smoke">
-                  ✓ Kept together in your Library —{" "}
-                  <Link href={`/?meal=${mealId}`} className="font-semibold text-char underline underline-offset-2">
-                    open it under Meals
-                  </Link>
-                </p>
-              )
+            {allSaved && mealId && (
+              <p className="text-center text-xs text-smoke">
+                ✓ Kept together in your Library —{" "}
+                <Link href={`/?meal=${mealId}`} className="font-semibold text-char underline underline-offset-2">
+                  open it under Meals
+                </Link>
+              </p>
             )}
           </div>
         </motion.section>
@@ -538,10 +571,10 @@ export function MakeWeek({
       </AnimatePresence>
 
       <AnimatePresence>
-        {addOpen && allSaved && (
+        {addOpen && addIds.length > 0 && (
           <AddToListSheet
-            source={{ recipe_ids: writtenRefs.map((r) => saved[r].id) }}
-            title="Add the week to your list"
+            source={{ recipe_ids: addIds }}
+            title="Add the whole week to your list"
             onClose={() => setAddOpen(false)}
             onAdded={(n) => setAddedCount(n)}
           />
@@ -551,11 +584,28 @@ export function MakeWeek({
   );
 }
 
-function OptionRow({ label, children }: { label: string; children: React.ReactNode }) {
+function OptionRow({
+  label,
+  wrap = false,
+  children,
+}: {
+  label: string;
+  /** Wrap onto a second line instead of scrolling — every choice stays in view. */
+  wrap?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="mt-2 flex items-center gap-3">
-      <span className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-smoke">{label}</span>
-      <div className="no-scrollbar -mr-4 flex gap-1.5 overflow-x-auto pr-4">{children}</div>
+    <div className={`mt-2 flex gap-3 ${wrap ? "items-start" : "items-center"}`}>
+      <span
+        className={`w-[4.5rem] shrink-0 text-xs font-semibold uppercase tracking-wide text-smoke ${wrap ? "pt-2.5" : ""}`}
+      >
+        {label}
+      </span>
+      <div
+        className={wrap ? "flex flex-wrap gap-1.5" : "no-scrollbar -mr-4 flex gap-1.5 overflow-x-auto pr-4"}
+      >
+        {children}
+      </div>
     </div>
   );
 }

@@ -339,6 +339,18 @@ is used when nights > 3).
   returns no dishes for them) and any batch size without a number ("one big
   pot" of chili), failing the whole ask.
 
+**Owner change (2026-10-24, after first use): several prep days.** The
+Prep day chips (None/Sat/Sun, pick one) became **Prep days: None + Sun–Sat,
+pick any** (wrapping onto two lines so every day shows). The outline takes
+`prep_days`; each component gets a `prep_day`; `prep_sessions` holds one
+session per prep day; the prep area shows one card per day ("Prep · Sun",
+"Prep · Wed"). The week starts on the chosen prep day that comes soonest.
+Weeks saved with the old single `prep_day` / `prep_plan` still render.
+Live test ("cook on Sunday and Wednesday, sheet tray veggies", 7 nights, 3
+people): Sunday stocked Sun–Tue (veg tray + chicken braise), Wednesday
+restocked Wed–Fri (fresh tray + taco filling), one session each; outline
+took 55s.
+
 **Phone checklist (draft):** switch to Plan the week, pick 5 nights, 2
 people, Sun prep, type the veggie-tray request; check the prep card, five
 night cards with weekdays, and that swapping one night changes only that

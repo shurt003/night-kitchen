@@ -12,6 +12,8 @@ export type WeekComponent = {
   makes: string;
   /** Night numbers (1-based) that use it. */
   used_on: number[];
+  /** The prep day it's cooked on ("Sun"), or null when there's no prep day. */
+  prep_day?: string | null;
 };
 
 /**
@@ -37,30 +39,52 @@ export type WeekOutline = {
   title: string;
   components: WeekComponent[];
   nights: WeekNight[];
-  /** The bulk-cooking session, in order. Null when nothing is cooked ahead. */
+  /** One cooking session per prep day, in week order. */
+  prep_sessions?: { day: string; plan: GamePlanStep[] }[];
+  /** The prep days the cook chose ("Sun", "Wed"); empty means none. */
+  prep_days?: string[];
+  /** Older saved weeks: a single session and a single prep day. */
   prep_plan: GamePlanStep[] | null;
-  /** The prep day the cook chose, or null (bulk items then cook on night 1). */
-  prep_day: "Sat" | "Sun" | null;
+  prep_day?: string | null;
 };
 
 export const WEEK_NIGHT_CHOICES = [3, 4, 5, 6, 7] as const;
 export const WEEK_PEOPLE_CHOICES = [1, 2, 3, 4, 6] as const;
-/** Null is "no prep day" — bulk items are then cooked on the first night. */
-export const WEEK_PREP_DAYS = [null, "Sat", "Sun"] as const;
-export type PrepDay = (typeof WEEK_PREP_DAYS)[number];
-
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Any days can be prep days (none is fine — bulk items then cook on night 1). */
+export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 /**
- * Weekday labels for the nights. The week starts on the prep day when there is
- * one (you cook in bulk and eat that night too) — the next one, or today if
- * today is it — and otherwise today.
+ * The weekday the week starts on: the chosen prep day that comes soonest from
+ * today (today counts) — you cook in bulk and eat that night too — or today
+ * when there's no prep day.
  */
-export function nightLabels(nights: number, prepDay: PrepDay, today = new Date()): string[] {
-  // Only the weekday matters for a label, so "the next Sunday, or today" and
-  // "Sunday" come to the same thing.
-  const start = prepDay ? DAY_NAMES.indexOf(prepDay) : today.getDay();
+export function weekStartDay(prepDays: string[], today = new Date()): number {
+  const t = today.getDay();
+  const idx = prepDays.map((d) => DAY_NAMES.indexOf(d as (typeof DAY_NAMES)[number])).filter((i) => i >= 0);
+  if (!idx.length) return t;
+  return idx.sort((a, b) => ((a - t + 7) % 7) - ((b - t + 7) % 7))[0];
+}
+
+/** Weekday labels for the nights, starting from `weekStartDay`. */
+export function nightLabels(nights: number, prepDays: string[], today = new Date()): string[] {
+  const start = weekStartDay(prepDays, today);
   return Array.from({ length: nights }, (_, i) => DAY_NAMES[(start + i) % 7]);
+}
+
+/**
+ * The prep sessions to show, oldest saved shape included: per-day sessions
+ * when there are any, else the single session under the single prep day.
+ */
+export function prepSessions(outline: WeekOutline): { day: string | null; plan: GamePlanStep[] }[] {
+  if (outline.prep_sessions?.length) return outline.prep_sessions;
+  if (outline.prep_plan?.length) return [{ day: outline.prep_day ?? null, plan: outline.prep_plan }];
+  return [];
+}
+
+/** The prep days a week was planned with (older saved weeks had one). */
+export function weekPrepDays(outline: WeekOutline): string[] {
+  if (outline.prep_days) return outline.prep_days;
+  return outline.prep_day ? [outline.prep_day] : [];
 }
 
 /** The components a night uses, by title — for its "uses" line. */

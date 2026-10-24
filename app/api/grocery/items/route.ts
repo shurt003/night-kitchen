@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     candidates = await candidatesForRecipe(userId, body.recipe_id);
   } else if (Array.isArray(body.recipe_ids)) {
     const lists = await Promise.all(
-      body.recipe_ids.slice(0, 8).map((id: string) => candidatesForRecipe(userId, String(id)))
+      body.recipe_ids.slice(0, 16).map((id: string) => candidatesForRecipe(userId, String(id)))
     );
     candidates = lists.flat();
   } else if (body.planned_meal_id) {

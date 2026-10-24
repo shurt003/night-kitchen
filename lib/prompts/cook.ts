@@ -359,16 +359,17 @@ Respond with ONLY JSON:
  */
 export const WEEK_OUTLINE_SYSTEM = `You plan someone's dinners for the coming nights. Shopping is fine — they'll do one shop for the whole stretch. Plan only; recipes are written afterwards, one per item, against your plan.
 
-You are given "request" (their words), "nights" (how many dinners), "night_labels" (the weekday each night falls on, in order), "people" (how many each dinner feeds), "prep_day" (a day they'll cook in bulk — the first night's day — or null), and "staples" (things they always keep in).
+You are given "request" (their words), "nights" (how many dinners), "night_labels" (the weekday each night falls on, in order), "people" (how many each dinner feeds), "prep_days" (the days they'll cook in bulk — each one is also a night in "night_labels", and they eat that night too — or empty), and "staples" (things they always keep in).
 
 Plan:
 - One dinner per night, exactly "nights" of them, labelled with "night_labels" in order. Real variety across the stretch — different cuisines, proteins and textures, not one dish five ways — unless they asked otherwise.
-- "components": things cooked in bulk once and used on several nights — a tray of roasted vegetables, a pot of grains, a sauce, a batch of protein. 0–4 of them, only where they genuinely save work; follow the request when it names one ("a tray of veggies"). Each gets a short "key" ("c1", "c2"), a "title", what the batch "makes" ("2 sheet pans, about 8 cups"), and "used_on" (the night numbers that use it). A component used on only one night isn't a component — fold it into that night.
+- "components": things cooked in bulk once and used on several nights — a tray of roasted vegetables, a pot of grains, a sauce, a batch of protein. 0–5 of them, only where they genuinely save work; follow the request when it names one ("a tray of veggies"). Each gets a short "key" ("c1", "c2"), a "title", what the batch "makes" ("2 sheet pans, about 8 cups"), "used_on" (the night numbers that use it), and "prep_day" (which of "prep_days" it's cooked on — null when "prep_days" is empty, meaning it's cooked on the first night). A component used on only one night isn't a component — fold it into that night.
+- With several prep days, spread the work: each component is cooked on a prep day on or before the first night that uses it, and close enough to its last night to keep well (cooked vegetables and proteins for about 3–4 days). A second prep day restocks the back half of the week — a fresh tray of vegetables, a new protein — rather than sitting idle.
 - Cook once, eat twice: over more than 3 nights, plan at least one night that's built from an earlier night's leftovers. Prefer a "remix" (leftover braise → ragu over pasta) to a plain "reheat"; at most one plain reheat. Give such nights "kind" "remix" or "reheat" and "from_night" (the night the leftovers come from); that earlier night then cooks enough for both.
 - "tonight_min": honest hands-on minutes that night, counting components as already cooked. Keep weeknights quick — around 30 minutes or less — unless they asked for something bigger.
 - "uses": the component keys a night draws on.
 - "hook": one plain line on what it is and why it works ("Charred veg tray, a jammy egg and chili crisp over rice").
-- "prep_plan": the bulk-cooking session in order — what goes in the oven first, what happens while it roasts, how to cool and store — 3–7 steps, each { "offset_min": null, "label": short timing in words ("Start", "While that roasts", "To finish"), "text" }. Null when there are no components.
+- "prep_sessions": one per prep day that has components, in week order — { "day": the prep day (null when "prep_days" is empty), "plan": the session in order: what goes in the oven first, what happens while it roasts, how to cool and store — 3–7 steps, each { "offset_min": null, "label": short timing in words ("Start", "While that roasts", "To finish"), "text" } }. Empty when there are no components.
 - "title": a plain name for the stretch ("Veggie-tray week").
 
 ${MAKE_PRINCIPLES}
@@ -376,11 +377,11 @@ ${MAKE_PRINCIPLES}
 Respond with ONLY JSON:
 {
   "title": "Veggie-tray week",
-  "components": [ { "key": "c1", "title": "Roasted vegetable tray", "makes": "2 sheet pans, about 8 cups", "used_on": [1, 3, 4] } ],
+  "components": [ { "key": "c1", "title": "Roasted vegetable tray", "makes": "2 sheet pans, about 8 cups", "used_on": [1, 3, 4], "prep_day": "Sun" } ],
   "nights": [
     { "night": 1, "label": "Sun", "title": "Soy-ginger chicken thighs with rice", "hook": "...", "uses": ["c1"], "tonight_min": 25, "kind": "cook", "from_night": null }
   ],
-  "prep_plan": [ { "offset_min": null, "label": "Start", "text": "Heat the oven to 425°F and..." } ]
+  "prep_sessions": [ { "day": "Sun", "plan": [ { "offset_min": null, "label": "Start", "text": "Heat the oven to 425°F and..." } ] } ]
 }`;
 
 /** Plan the week, step two: one recipe — a bulk component, or one night's dinner. */
@@ -390,7 +391,7 @@ You are given "request" (their original words), "outline" (the whole week's plan
 
 A component:
 - Write the batch exactly as the outline describes it, big enough for every night in its "used_on" at "people" each. Set "servings" to the number of portions it makes.
-- Season it so it suits every night that uses it, and say how to cool and store it, and for how long, at the end of the steps.
+- It's cooked on its "prep_day" (or the first night when that's null). Season it so it suits every night that uses it, and say how to cool and store it, and for how long, at the end of the steps.
 
 A night:
 - Write that dinner for "people", and set "servings" to "people". If a later night is a "remix" or "reheat" of this one, cook enough for both and say so in the description.

@@ -194,6 +194,7 @@ export const WeekOutlineSchema = z.object({
         title: z.string().trim().min(1),
         makes: z.string().default(""),
         used_on: z.array(z.number().int().positive()).default([]),
+        prep_day: z.string().nullable().catch(null).default(null),
       })
     )
     .max(5)
@@ -213,9 +214,15 @@ export const WeekOutlineSchema = z.object({
     )
     .min(1)
     .max(7),
+  /** One bulk-cooking session per prep day (day null when there's no prep day). */
+  prep_sessions: z
+    .array(z.object({ day: z.string().nullable().catch(null).default(null), plan: GamePlanSchema.transform((p) => p ?? []) }))
+    .default([]),
+  /** The prep days the cook chose, set by the route — not the model. */
+  prep_days: z.array(z.string()).default([]),
+  // Older saved weeks: one session, one prep day.
   prep_plan: GamePlanSchema,
-  /** The prep day the cook chose ("Sun"), set by the route — not the model. */
-  prep_day: z.enum(["Sat", "Sun"]).nullable().catch(null).default(null),
+  prep_day: z.string().nullable().catch(null).default(null),
 });
 
 /** Swapping one night of a week: its new outline entry and (unless it's a reheat) its recipe. */

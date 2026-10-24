@@ -240,11 +240,25 @@ export function MealSheet({
 
           {error && <p className="mt-3 text-sm text-flame">{error}</p>}
 
+          {/* A week's master button sits up top, where it's the first thing you
+              reach for on shopping day. */}
+          {week && (
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              transition={springUI}
+              onClick={() => setAddOpen(true)}
+              className={`mt-4 w-full rounded-xl py-3 font-display font-bold ${
+                addedCount ? "bg-herb text-chalk" : "bg-flame text-accent-ink"
+              }`}
+            >
+              {addedCount ? `✓ ${addedCount} on the list` : "Add everything to grocery list"}
+            </motion.button>
+          )}
+
           {week ? (
             <div className="mt-4">
               <WeekView
                 outline={week}
-                prepDay={week.prep_day ?? null}
                 componentSlot={(k) => weekSlot(dishFor(0, k))}
                 nightSlot={(n) => weekSlot(dishFor(n))}
                 onOpenComponent={(k) => {
@@ -284,16 +298,18 @@ export function MealSheet({
             </div>
           )}
 
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            transition={springUI}
-            onClick={() => setAddOpen(true)}
-            className={`mt-4 w-full rounded-xl py-3 font-display font-bold ${
-              addedCount ? "bg-herb text-chalk" : "bg-char text-tile"
-            }`}
-          >
-            {addedCount ? `✓ ${addedCount} on the list` : "Add everything to grocery list"}
-          </motion.button>
+          {!week && (
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              transition={springUI}
+              onClick={() => setAddOpen(true)}
+              className={`mt-4 w-full rounded-xl py-3 font-display font-bold ${
+                addedCount ? "bg-herb text-chalk" : "bg-char text-tile"
+              }`}
+            >
+              {addedCount ? `✓ ${addedCount} on the list` : "Add everything to grocery list"}
+            </motion.button>
+          )}
 
           <button
             onClick={() => setConfirmDelete(true)}

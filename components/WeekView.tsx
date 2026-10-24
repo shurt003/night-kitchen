@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { springSoft } from "@/lib/springs";
-import { usesTitles, type WeekOutline } from "@/lib/weekPlan";
+import { prepSessions, usesTitles, weekPrepDays, type WeekOutline } from "@/lib/weekPlan";
 import { GamePlan } from "./GamePlan";
 import { SwapPanel } from "./SwapPanel";
 
@@ -18,7 +18,6 @@ export type WeekSlot = { state: "ready"; saved: boolean } | { state: "failed" } 
  */
 export function WeekView({
   outline,
-  prepDay,
   componentSlot,
   nightSlot,
   onOpenComponent,
@@ -27,8 +26,6 @@ export function WeekView({
   onRetry,
 }: {
   outline: WeekOutline;
-  /** "Sun", or null when there's no separate prep day. */
-  prepDay: string | null;
   componentSlot: (key: string) => WeekSlot;
   nightSlot: (night: number) => WeekSlot;
   onOpenComponent: (key: string) => void;
@@ -40,46 +37,58 @@ export function WeekView({
   const [swapAt, setSwapAt] = useState<number | null>(null);
   const labelOf = (n: number) => outline.nights.find((x) => x.night === n)?.label ?? `Night ${n}`;
 
+  // One prep card per prep day, each with the components cooked that day and
+  // its session. No prep days: one "Cook ahead" card (cooked on night 1).
+  const days = weekPrepDays(outline);
+  const sessions = prepSessions(outline);
+  const groups = (days.length ? days : [null]).map((day) => ({
+    day,
+    components: outline.components.filter((c) => (days.length ? (c.prep_day ?? days[0]) === day : true)),
+    plan: sessions.find((s) => s.day === day)?.plan ?? (days.length <= 1 ? sessions[0]?.plan : undefined) ?? [],
+  }));
+
   return (
     <div className="space-y-4">
-      {outline.components.length > 0 && (
-        <section className="rounded-[14px] border border-char/10 bg-surface p-3">
-          <p className="font-display text-xs font-bold uppercase tracking-widest text-flame">
-            {prepDay ? `Prep · ${prepDay}` : "Cook ahead"}
-          </p>
-          <p className="mt-0.5 text-sm text-smoke">
-            Made once, used through the week{prepDay ? "" : " — cook these on the first night"}.
-          </p>
-          <ul className="mt-2 space-y-1.5">
-            {outline.components.map((c) => {
-              const slot = componentSlot(c.key);
-              return (
-                <li key={c.key}>
-                  <button
-                    onClick={() => (slot.state === "failed" ? onRetry?.({ component: c.key }) : onOpenComponent(c.key))}
-                    disabled={slot.state === "missing"}
-                    className="w-full rounded-[10px] bg-char/5 px-3 py-2.5 text-left disabled:opacity-60"
-                  >
-                    <span className="flex items-baseline gap-2">
-                      <span className="min-w-0 flex-1 font-display text-[15px] font-bold">{c.title}</span>
-                      <SlotNote slot={slot} />
-                    </span>
-                    <span className="mt-0.5 block text-xs text-smoke">
-                      {c.makes}
-                      {c.used_on.length > 0 && ` · for ${c.used_on.map(labelOf).join(", ")}`}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {outline.prep_plan && outline.prep_plan.length > 0 && (
-            <div className="mt-3">
-              <GamePlan steps={outline.prep_plan} title="Prep session" />
-            </div>
-          )}
-        </section>
-      )}
+      {groups
+        .filter((g) => g.components.length > 0 || g.plan.length > 0)
+        .map((g) => (
+          <section key={g.day ?? "ahead"} className="rounded-[14px] border border-char/10 bg-surface p-3">
+            <p className="font-display text-xs font-bold uppercase tracking-widest text-flame">
+              {g.day ? `Prep · ${g.day}` : "Cook ahead"}
+            </p>
+            <p className="mt-0.5 text-sm text-smoke">
+              {g.day ? "Made once, used through the week." : "Made once on the first night, used through the week."}
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {g.components.map((c) => {
+                const slot = componentSlot(c.key);
+                return (
+                  <li key={c.key}>
+                    <button
+                      onClick={() => (slot.state === "failed" ? onRetry?.({ component: c.key }) : onOpenComponent(c.key))}
+                      disabled={slot.state === "missing"}
+                      className="w-full rounded-[10px] bg-char/5 px-3 py-2.5 text-left disabled:opacity-60"
+                    >
+                      <span className="flex items-baseline gap-2">
+                        <span className="min-w-0 flex-1 font-display text-[15px] font-bold">{c.title}</span>
+                        <SlotNote slot={slot} />
+                      </span>
+                      <span className="mt-0.5 block text-xs text-smoke">
+                        {c.makes}
+                        {c.used_on.length > 0 && ` · for ${c.used_on.map(labelOf).join(", ")}`}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {g.plan.length > 0 && (
+              <div className="mt-3">
+                <GamePlan steps={g.plan} title={g.day ? `${g.day} prep session` : "Prep session"} />
+              </div>
+            )}
+          </section>
+        ))}
 
       <ul className="space-y-2">
         {outline.nights.map((n, i) => {
