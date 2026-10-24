@@ -66,6 +66,18 @@ function formatDecimal(n: number): string {
   return (Math.round(n * 100) / 100).toString();
 }
 
+/**
+ * A weight to sit beside the measured amount, scaled with it: "4 g", "1.5 g",
+ * "230 g". Half-grams below 10 (a teaspoon of baking powder is 4 g, half of
+ * one is 2 g, and that difference matters), whole grams above.
+ */
+export function formatGrams(grams: number | null | undefined, factor = 1): string | null {
+  if (!grams || grams <= 0) return null;
+  const g = grams * factor;
+  const n = g < 10 ? Math.round(g * 2) / 2 : Math.round(g);
+  return `${n} g`;
+}
+
 const WHOLE_ONLY = /egg|clove|onion|shallot|lemon|lime|orange|apple|banana|avocado|potato|pepper\b|chile|chili\b|tortilla|bun\b|roll\b|steak|thigh|breast|drumstick|sausage|can\b|jar\b|sheet|sprig/i;
 
 export function scaleIngredientQuantity(

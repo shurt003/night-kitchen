@@ -153,6 +153,14 @@ rule).
       "one 9×13 pan, about 16 brownies" with grams + doneness cues (17s);
       "dinner for 6: short ribs, a side, and a dessert" gave 3 dishes + a
       7-step game plan (53s).
+- [x] Gate feedback (owner, 2026-10-24): brownies showed no grams. Cause: the
+      recipe view renders quantity + unit + item and never `raw`, so grams
+      written into `raw` were invisible. Fix: an optional `grams` field on
+      ingredients (`IngredientSchema`), shown as "1¼ tsp (4 g) kosher salt"
+      and scaled with servings in `RecipeDetail` (plus cook mode). Make's
+      baking lines require it on every ingredient except whole eggs, with
+      kosher salt weights assuming Diamond Crystal. Re-tested brownies and
+      cookies: every measured line had grams.
 - **Phone checklist:**
   - "chicken tikka masala" asks for servings, and the recipe has temps + cues.
   - "brownies" doesn't ask, shows the pan yield, and uses dessert rules

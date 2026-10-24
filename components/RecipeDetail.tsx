@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import type { Recipe } from "@/lib/types";
-import { scaleIngredientQuantity } from "@/lib/scale";
+import { formatGrams, scaleIngredientQuantity } from "@/lib/scale";
 import { springSoft, springUI } from "@/lib/springs";
 import { LoveButton } from "./LoveButton";
 import { RollingNumber } from "./RollingNumber";
@@ -470,16 +470,18 @@ export function RecipeDetail({
               <ul className="space-y-1.5">
                 {ings.map((ing, i) => {
                   const { display, roundedNote } = scaleIngredientQuantity(ing.quantity, ing.item, factor);
+                  const grams = formatGrams(ing.grams, factor);
                   // One flowing line with a bold quantity, rather than a quantity
                   // column — amounts like "1 14-ounce can/jar" vary so much in
                   // width that a column leaves every row starting at a different
                   // x.
                   return (
                     <li key={i} className="text-[15px]">
-                      {(display || ing.unit) && (
+                      {(display || ing.unit || grams) && (
                         <span className="font-semibold">
                           {display && <RollingNumber value={display} />}
                           {ing.unit ? ` ${ing.unit}` : ""}
+                          {grams && <span className="font-normal text-smoke"> ({grams})</span>}
                         </span>
                       )}{" "}
                       {ing.item}

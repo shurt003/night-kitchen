@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Recipe } from "@/lib/types";
 import { springSoft, springOvershoot } from "@/lib/springs";
 import { CookTimer, useTimers } from "./CookTimer";
-import { scaleIngredientQuantity } from "@/lib/scale";
+import { formatGrams, scaleIngredientQuantity } from "@/lib/scale";
 
 /**
  * Full screen, one step at a time. Assumes greasy hands: large type, high
@@ -205,10 +205,12 @@ export function CookMode({ recipeId }: { recipeId: string }) {
                 <ul className="mt-2 space-y-1">
                   {stepIngredients.map((ing, i) => {
                     const { display } = scaleIngredientQuantity(ing.quantity, ing.item, 1);
+                    const grams = formatGrams(ing.grams);
                     return (
                       <li key={i} className="text-[17px]">
                         <span className="font-semibold">
                           {display} {ing.unit ?? ""}
+                          {grams && <span className="font-normal opacity-60"> ({grams})</span>}
                         </span>{" "}
                         {ing.item}
                       </li>

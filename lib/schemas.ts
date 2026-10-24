@@ -8,6 +8,10 @@ export const IngredientSchema = z.object({
   item: z.string(),
   note: z.string().nullable().default(null),
   section: z.string().nullable().default(null), // "For the sauce" groupings
+  // Weight in grams, shown beside the measured amount ("1¼ tsp (4 g)"). Make
+  // fills it for baking; everything else leaves it null. .catch so a stray
+  // non-number drops the weight rather than failing the whole recipe.
+  grams: z.number().positive().nullable().catch(null).default(null),
 });
 export type Ingredient = z.infer<typeof IngredientSchema>;
 

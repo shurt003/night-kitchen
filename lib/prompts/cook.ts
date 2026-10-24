@@ -112,7 +112,7 @@ const MAKE_PRINCIPLES = [
   SAVORY.rest,
   "",
   "Desserts and baking:",
-  "- Precision matters more here. Give grams alongside cups and spoons for flour, sugar, butter and liquids, and exact oven temperatures. Preheat fully.",
+  "- Precision matters more here. Every ingredient gets its weight in \"grams\" (a number) — flour, sugar, butter, chocolate and liquids, and the small amounts too: salt, baking powder and soda, spices, extracts. Keep \"quantity\" and \"unit\" as the cook would measure it (cups, spoons, ounces) and put the weight only in \"grams\"; write \"raw\" with both, like \"1¼ tsp (4 g) kosher salt\". Whole eggs are the one exception: \"grams\" null. Kosher salt weights assume Diamond Crystal (about 3 g per teaspoon) — say so in the salt's \"note\". Give exact oven temperatures, and preheat fully.",
   "- Butter temperature is a technique: cold for flaky (pie, biscuits, scones), softened for creaming (cakes, cookies), melted for chewy and dense, browned for nutty depth. Say which and why.",
   "- Salt belongs in sweets — it sharpens sweetness and flavour rather than making it taste salty. Acid brightens too (zest, a squeeze of juice, buttermilk, yoghurt), and with baking soda it's also lift.",
   "- Build flavour with heat: toast nuts and spices, take caramel to amber, brown the butter, bake until properly golden rather than pale.",
@@ -249,6 +249,7 @@ Rules:
 - If "max_active_min" is set, keep hands-on time inside it — for a meal, the cook's total hands-on time across all dishes. Unattended time doesn't count.
 - Be honest about "time_total_min" and "time_active_min".
 - Ingredients: "raw" is the full line as a person would read it ("2 tbsp soy sauce"); the other fields break that same line apart. Use "section" only when the recipe genuinely has parts ("For the sauce").
+- "grams": required on every ingredient of a dessert or baked good (see the baking lines below). For savory dishes, null.
 - Steps carry real technique — heat level, what it should look like, what to listen for.
 - "timer_seconds" only where a step is genuinely timed and unattended. Null everywhere else.
 - "course" is "meals" (a main), "appetizers", "sides", "desserts", "drinks", or "misc".
@@ -263,7 +264,8 @@ Respond with ONLY JSON:
       "title": "...",
       "description": "a sentence or two on what it is",
       "ingredients": [
-        { "raw": "2 tbsp soy sauce", "quantity": "2", "unit": "tbsp", "item": "soy sauce", "note": null, "section": null }
+        { "raw": "2 tbsp soy sauce", "quantity": "2", "unit": "tbsp", "item": "soy sauce", "note": null, "section": null, "grams": null },
+        { "raw": "1¼ cups (156 g) all-purpose flour", "quantity": "1¼", "unit": "cups", "item": "all-purpose flour", "note": null, "section": null, "grams": 156 }
       ],
       "steps": [ { "text": "...", "timer_seconds": null } ],
       "servings": 4,
