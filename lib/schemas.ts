@@ -160,6 +160,8 @@ const GamePlanSchema = z
 
 /** Make, step two: one recipe, or a meal's recipes plus the order to cook them. */
 export const MakeRecipeSchema = z.object({
+  /** What a saved meal is called until the cook renames it. Null for one dish. */
+  meal_title: z.string().trim().max(120).nullable().catch(null).default(null),
   dishes: z.array(ExtractionSchema).min(1).max(4),
   game_plan: GamePlanSchema,
 });

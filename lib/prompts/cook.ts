@@ -292,7 +292,7 @@ You are given "request" (their words), "kind" ("dish" or "meal"), "dishes" (what
 
 Rules:
 - Write what they asked for. If they named a known dish, write an excellent, faithful version of it — not a twist — unless they asked for a twist. Write it in your own words; never reproduce a published recipe's text.
-- A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then write the game plan (below). For a single dish, "game_plan" is null.
+- A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then write the game plan (below), and give the meal a short, plain name in "meal_title" — what you'd call it to a friend ("Short rib dinner", "Taco night"), not a menu flourish. For a single dish, both are null.
 ${MAKE_DISH_RULES}
 
 For a meal, ${MAKE_GAME_PLAN_RULES}
@@ -301,13 +301,14 @@ ${MAKE_PRINCIPLES}
 
 Respond with ONLY JSON:
 {
+  "meal_title": "Short rib dinner",
   "dishes": [
     ${MAKE_DISH_JSON}
   ],
   "game_plan": ${MAKE_GAME_PLAN_JSON}
 }
 
-("game_plan" is null for a single dish.)`;
+("meal_title" and "game_plan" are null for a single dish.)`;
 
 /**
  * Make, swapping one dish of a meal: a different dish in the same slot that

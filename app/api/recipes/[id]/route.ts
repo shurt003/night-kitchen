@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { db } from "@/lib/db";
 import { updateEmbedding } from "@/lib/extract";
 import { currentUserId } from "@/lib/auth";
+import { deleteRecipeFully, mealsForRecipe } from "@/lib/savedMeals";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -17,7 +18,8 @@ export async function GET(req: Request, { params }: Params) {
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ recipe: data });
+  // Which saved meals it's part of, for the "Part of" link on the recipe.
+  return NextResponse.json({ recipe: data, part_of: await mealsForRecipe(userId, id) });
 }
 
 const EDITABLE = new Set([
@@ -62,19 +64,11 @@ export async function DELETE(req: Request, { params }: Params) {
   const userId = await currentUserId(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const supabase = db();
-
-  // Verify ownership before touching Storage, so a non-owner can't delete files.
-  const { data: owned } = await supabase
-    .from("recipes").select("id").eq("id", id).eq("user_id", userId).maybeSingle();
-  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
-
-  const { data: files } = await supabase.storage.from("captures").list(id);
-  if (files?.length) {
-    await supabase.storage.from("captures").remove(files.map((f) => `${id}/${f.name}`));
+  try {
+    const result = await deleteRecipeFully(userId, id);
+    if (result === "not_found") return NextResponse.json({ error: "Not found" }, { status: 404 });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
-
-  const { error } = await supabase.from("recipes").delete().eq("id", id).eq("user_id", userId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

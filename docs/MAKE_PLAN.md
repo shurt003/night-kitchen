@@ -211,21 +211,32 @@ meal kept together, viewable like the Make page, plus two extras. Decisions:
   the side with "something lighter" and check the game plan mentions the new
   side and not the old one.
 
-#### 2.5b: Saved meals in the Library (migration `011_saved_meals.sql`)
+#### 2.5b: Saved meals in the Library (migrations `011` + `012`)
+- [x] 2.5a shipped (a9d9a50). The owner also dropped the One dish / Whole
+      meal pills: the scope read takes it from the words.
+- [x] `011_saved_meals.sql` and `012_saved_meals_nights.sql` run by the owner 2026-10-24.
+- [ ] **`012_saved_meals_nights.sql`** (owner runs before any 2.5b code is
+      pushed): makes saved meals multi-night-ready for 2.6 while the tables
+      are still empty. Adds `kind` ('meal' | 'nights'), `nights` (per-night
+      label + game plan); dishes get their own `id`, a `night` and a `note`,
+      so one recipe can sit on two nights (cook once, eat twice). 2.5b itself
+      only ever writes `kind = 'meal'`, night 1.
+- [x] Every saved meal has a **name**: suggested when saved ("Short rib
+      dinner"), tap to rename, in the Make results and the meal sheet.
 - [ ] **Migration first:** the owner runs `011_saved_meals.sql` in Supabase
       before any code that reads it is pushed. It adds `saved_meals` (title,
       request, servings, game plan, serve_time) and `saved_meal_dishes`
       (ordered recipe ids; deleting a recipe drops it from its meal).
-- [ ] "Save all" on a meal also saves the meal. Re-saving after a swap
+- [x] "Save all" on a meal also saves the meal. Re-saving after a swap
       updates the same meal rather than creating a second.
-- [ ] Library: "Mains" relabel; "Meals" toggle pill showing meal cards only.
+- [x] Library: "Mains" relabel; "Meals" toggle pill showing meal cards only.
       The meal card shows the title, dish names, "3 dishes · serves 6", and
       the main's photo once it has one.
-- [ ] Meal sheet: same layout as the Make results (game plan with dinner
+- [x] Meal sheet: same layout as the Make results (game plan with dinner
       time, dish cards → normal recipe sheet), plus "Add everything to
       grocery list" and "Swap" on each dish.
-- [ ] A recipe that belongs to a meal shows "Part of: <meal>" linking back.
-- [ ] Deleting a meal opens a **confirmation sheet that animates up** (the
+- [x] A recipe that belongs to a meal shows "Part of: <meal>" linking back.
+- [x] Deleting a meal opens a **confirmation sheet that animates up** (the
       owner's call; the one place a confirm is used instead of only an undo,
       because the choice matters) with two options: **"Delete the meal, keep
       the recipes"** and **"Delete the meal and its N recipes"**, plus Cancel.
@@ -234,12 +245,46 @@ meal kept together, viewable like the Make page, plus two extras. Decisions:
       nothing is removed server-side until the toast's window closes, so undo
       is lossless (recipes, photos, cook logs). If the app is closed inside
       the window, nothing is deleted (the safe direction).
+- Built 2026-10-24, verified by typecheck, build and a visual check only:
+  the meals routes need the database, which isn't reachable locally, so the
+  phone checklist is the first real run. Swapping inside a saved meal saves
+  the new dish straight away and updates the meal; the old recipe stays.
 - **Phone checklist:** save a meal; toggle Meals on in the Library and open
   it; the game plan and dinner time are there; open a dish and follow its
   "Part of" link back; delete the meal choosing "keep the recipes" and check
   the three recipes are still there, then undo; delete it again choosing
   "and its recipes", check all are gone, then undo and check everything is
   back, photos included.
+
+### Phase 2.6: Multi-night plans (owner's idea, 2026-10-24)
+
+"Dinners for the next 5 nights for two", "cook once on Sunday, eat three
+nights", "short ribs that work for two nights". The owner said to treat the
+Plan page as if it doesn't exist for this: it lives entirely in Make and
+saves under the Library's "Meals" toggle (name kept as "Meals"). To be
+planned in detail before building; the shape so far:
+
+- **Outline first, recipes second.** A quick outline (~20s): one line per
+  night (dish, or "leftover ribs → ragu over pappardelle"), a shared prep
+  session ("Sunday, 90 min: braise the ribs, cook the rice, make the sauce"),
+  and ingredient overlap ("one bunch of cilantro covers Mon and Thu"). Swap
+  any night here, cheaply, before anything is written. Then **"Write it
+  all"** writes every recipe in parallel (~30s total, not 3+ min in one call
+  that could hit the time limit).
+- **Cook once, eat twice:** the cook is scaled to cover both nights; night two
+  is the dish reheated or remixed, with storage and reheating notes.
+- **One grocery list** for the whole stretch, de-duplicated.
+- **Named** like every saved meal; the Library card reads "5 nights · 7
+  recipes".
+- Storage is ready from `012` (`kind = 'nights'`, per-night rows).
+- **Open idea (owner, 2026-10-24, to revisit):** write recipes only when a
+  night is tapped, like Wing it, instead of "Write it all" up front. Agreed
+  shape if adopted: the outline carries each night's ingredients and a
+  combined shopping list (so one shop works before any recipe exists); a
+  night's recipe is written against the outline's ingredients and prep plan
+  as constraints; written nights are kept; a "Write all" button for prep
+  day; unwritten nights save as cards. Main win is speed (a recipe costs
+  ~2–3¢, a week ~10–15¢ up front).
 
 ### Phase 3: Polish
 - [ ] Loading copy and motion consistent with Wing it; Stop/cancel on long

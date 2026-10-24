@@ -25,6 +25,7 @@ export function RecipeDetail({
   draft = false,
   onSave,
   saving = false,
+  onOpenMeal,
 }: {
   recipe: Recipe;
   onClose: () => void;
@@ -38,6 +39,8 @@ export function RecipeDetail({
   draft?: boolean;
   onSave?: () => void;
   saving?: boolean;
+  /** Open a saved meal this recipe belongs to. Without it, the link navigates to the Library. */
+  onOpenMeal?: (mealId: string) => void;
 }) {
   const [recipe, setRecipe] = useState<Recipe>(initial);
   const [servings, setServings] = useState<number>(initial.servings ?? 4);
@@ -46,6 +49,8 @@ export function RecipeDetail({
   const { toast, show: showToast, undo } = useUndoToast();
   const [addedToList, setAddedToList] = useState(false);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  /** Saved meals this recipe is part of — the "Part of" link. */
+  const [partOf, setPartOf] = useState<{ id: string; title: string }[]>([]);
   const [imageStatus, setImageStatus] = useState<"idle" | "working" | "failed">("idle");
   const [imageError, setImageError] = useState<string | null>(null);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,6 +77,7 @@ export function RecipeDetail({
           setNotes(json.recipe.notes);
           if (json.recipe.servings) setServings(json.recipe.servings);
         }
+        if (Array.isArray(json.part_of)) setPartOf(json.part_of);
       });
   }, [initial.id, draft]);
 
@@ -333,6 +339,30 @@ export function RecipeDetail({
               </a>
             )}
           </div>
+
+          {partOf.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {partOf.map((m) =>
+                onOpenMeal ? (
+                  <button
+                    key={m.id}
+                    onClick={() => onOpenMeal(m.id)}
+                    className="rounded-full bg-char/5 px-3 py-1 text-xs font-semibold text-char"
+                  >
+                    Part of: {m.title} →
+                  </button>
+                ) : (
+                  <Link
+                    key={m.id}
+                    href={`/?meal=${m.id}`}
+                    className="rounded-full bg-char/5 px-3 py-1 text-xs font-semibold text-char"
+                  >
+                    Part of: {m.title} →
+                  </Link>
+                )
+              )}
+            </div>
+          )}
 
           {recipe.capture_gaps.length > 0 && (
             <p className="mt-3 rounded-lg bg-yolk/25 px-3 py-2 text-sm text-char/80">

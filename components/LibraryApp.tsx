@@ -6,6 +6,9 @@ import type { Recipe } from "@/lib/types";
 import { COURSES, COURSE_LABELS, type Course } from "@/lib/config";
 import { RecipeCard, SkeletonCard } from "./RecipeCard";
 import { RecipeDetail } from "./RecipeDetail";
+import { MealCard } from "./MealCard";
+import { MealSheet } from "./MealSheet";
+import type { SavedMeal } from "@/lib/savedMeals";
 import { UndoToast, useUndoToast } from "./UndoToast";
 import { springSoft } from "@/lib/springs";
 import {
@@ -26,6 +29,12 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
   const [loaded, setLoaded] = useState(false);
   const [openRecipe, setOpenRecipe] = useState<Recipe | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
+  // The "Meals" toggle: off, the library is recipes as it always was; on, it
+  // shows only saved full meals. Loaded the first time it's turned on.
+  const [mealsView, setMealsView] = useState(false);
+  const [meals, setMeals] = useState<SavedMeal[] | null>(null);
+  const [openMeal, setOpenMeal] = useState<SavedMeal | null>(null);
+  const pendingMealDeletes = useRef<Set<string>>(new Set());
   // "Shuffle library" preference — read after mount (localStorage isn't there on
   // the server) and kept in sync when it's toggled from the side menu.
   const [shuffle, setShuffle] = useState(false);
@@ -53,6 +62,80 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadMeals = useCallback(async () => {
+    const res = await fetch("/api/meals");
+    if (!res.ok) {
+      setMeals((m) => m ?? []);
+      return;
+    }
+    const json = await res.json();
+    setMeals(((json.meals ?? []) as SavedMeal[]).filter((m) => !pendingMealDeletes.current.has(m.id)));
+  }, []);
+
+  function showMeals(on: boolean) {
+    setMealsView(on);
+    if (on) {
+      setCourse(null);
+      loadMeals();
+    }
+  }
+
+  // A recipe's "Part of" link (or a deep link) lands here as /?meal=<id>: switch
+  // to meals and open that one, then tidy the URL back to "/".
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("meal");
+    if (!id) return;
+    window.history.replaceState({}, "", "/");
+    openMealById(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function openMealById(id: string) {
+    setMealsView(true);
+    setCourse(null);
+    loadMeals();
+    const res = await fetch(`/api/meals/${id}`);
+    if (res.ok) setOpenMeal((await res.json()).meal as SavedMeal);
+  }
+
+  function onMealChanged(m: SavedMeal) {
+    setOpenMeal((cur) => (cur && cur.id === m.id ? m : cur));
+    setMeals((ms) => (ms ? ms.map((x) => (x.id === m.id ? m : x)) : ms));
+  }
+
+  /**
+   * Deferred like a recipe delete: the meal (and, if chosen, its recipes)
+   * disappear at once, but nothing is removed server-side until the undo
+   * window closes — so undo is lossless, photos and cook logs included.
+   */
+  function deleteMeal(m: SavedMeal, withRecipes: boolean) {
+    setOpenMeal(null);
+    closeDetail();
+    pendingMealDeletes.current.add(m.id);
+    setMeals((ms) => (ms ? ms.filter((x) => x.id !== m.id) : ms));
+    const recipeIds = [...new Set(m.dishes.map((d) => d.recipe.id))];
+    if (withRecipes) {
+      for (const id of recipeIds) pendingDeletes.current.add(id);
+      setRecipes((rs) => rs.filter((r) => !recipeIds.includes(r.id)));
+    }
+    show(
+      withRecipes
+        ? `Deleted ${m.title} and its ${recipeIds.length} ${recipeIds.length === 1 ? "recipe" : "recipes"}`
+        : `Deleted ${m.title}`,
+      () => {
+        pendingMealDeletes.current.delete(m.id);
+        if (withRecipes) for (const id of recipeIds) pendingDeletes.current.delete(id);
+        loadMeals();
+        return load();
+      },
+      async () => {
+        await fetch(`/api/meals/${m.id}${withRecipes ? "?with_recipes=1" : ""}`, { method: "DELETE" });
+        pendingMealDeletes.current.delete(m.id);
+        if (withRecipes) for (const id of recipeIds) pendingDeletes.current.delete(id);
+      }
+    );
+  }
 
   // Pick up the shuffle preference on mount, and follow it live when it's
   // flipped in the side menu (a different component, so we sync via the event).
@@ -155,6 +238,29 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
 
   function onRecipeChanged(updated: Recipe) {
     setRecipes((rs) => rs.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
+    // Keep an open meal's card for this dish in step (a renamed title, a new photo).
+    const patchDishes = (m: SavedMeal) => ({
+      ...m,
+      dishes: m.dishes.map((d) => (d.recipe.id === updated.id ? { ...d, recipe: { ...d.recipe, ...updated } } : d)),
+    });
+    setOpenMeal((cur) => (cur ? patchDishes(cur) : cur));
+    setMeals((ms) => (ms ? ms.map(patchDishes) : ms));
+  }
+
+  /** Drop a recipe from any meal on screen (it was deleted). */
+  function dropFromMeals(recipeId: string) {
+    const without = (m: SavedMeal) => ({ ...m, dishes: m.dishes.filter((d) => d.recipe.id !== recipeId) });
+    setOpenMeal((cur) => (cur ? without(cur) : cur));
+    setMeals((ms) => (ms ? ms.map(without) : ms));
+  }
+
+  /** Re-read the meals after an undo put a recipe back. */
+  async function refreshMeals() {
+    if (meals !== null) await loadMeals();
+    if (openMeal) {
+      const res = await fetch(`/api/meals/${openMeal.id}`);
+      if (res.ok) onMealChanged((await res.json()).meal as SavedMeal);
+    }
   }
 
   /**
@@ -165,11 +271,13 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
     closeDetail();
     pendingDeletes.current.add(r.id);
     setRecipes((rs) => rs.filter((x) => x.id !== r.id));
+    dropFromMeals(r.id);
     show(
       `Deleted ${r.title}`,
       () => {
         // Nothing was deleted server-side — just stop hiding it and refetch.
         pendingDeletes.current.delete(r.id);
+        refreshMeals();
         return load();
       },
       async () => {
@@ -237,19 +345,34 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
       {recipes.length > 0 && (
         <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
           <button
-            onClick={() => setCourse(null)}
+            onClick={() => {
+              setCourse(null);
+              setMealsView(false);
+            }}
             className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${
-              course === null ? "bg-char text-tile" : "bg-char/5 text-smoke"
+              course === null && !mealsView ? "bg-char text-tile" : "bg-char/5 text-smoke"
             }`}
           >
             All
           </button>
+          <button
+            onClick={() => showMeals(!mealsView)}
+            aria-pressed={mealsView}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${
+              mealsView ? "bg-char text-tile" : "bg-char/5 text-smoke"
+            }`}
+          >
+            Meals
+          </button>
           {COURSES.map((c) => (
             <button
               key={c}
-              onClick={() => setCourse((cur) => (cur === c ? null : c))}
+              onClick={() => {
+                setMealsView(false);
+                setCourse((cur) => (cur === c ? null : c));
+              }}
               className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${
-                course === c ? "bg-char text-tile" : "bg-char/5 text-smoke"
+                course === c && !mealsView ? "bg-char text-tile" : "bg-char/5 text-smoke"
               }`}
             >
               {COURSE_LABELS[c]}
@@ -289,7 +412,50 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
       </AnimatePresence>
 
 
-      {loaded && shown.length === 0 && (
+      {/* Saved full meals — only while the Meals toggle is on. */}
+      {mealsView && (
+        <div className="mt-4">
+          {meals === null ? (
+            <div className="space-y-3">
+              {[0, 1].map((i) => (
+                <div key={i} className="shimmer h-[106px] rounded-[14px] bg-char/5" />
+              ))}
+            </div>
+          ) : meals.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={springSoft}
+              className="mt-12 text-center text-smoke"
+            >
+              <p className="font-display text-lg font-bold text-char/60">No saved meals yet.</p>
+              <p className="mt-1 text-sm">
+                Ask Make for a whole meal — &ldquo;short ribs, a side and a dessert&rdquo; — and tap
+                Save all.
+              </p>
+            </motion.div>
+          ) : (
+            <ul className="space-y-3">
+              <AnimatePresence mode="popLayout">
+                {meals.map((m, i) => (
+                  <motion.li
+                    key={m.id}
+                    layout
+                    initial={{ opacity: 0, y: 14 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ ...springSoft, delay: Math.min(i, 8) * 0.03 }}
+                  >
+                    <MealCard meal={m} onOpen={setOpenMeal} />
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+          )}
+        </div>
+      )}
+
+      {!mealsView && loaded && shown.length === 0 && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -339,7 +505,7 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
 
       <motion.div layout className="mt-4 grid grid-cols-2 gap-3">
         <AnimatePresence mode="popLayout">
-          {shown.map((r, i) => (
+          {(mealsView ? [] : shown).map((r, i) => (
             <motion.div
               key={r.id}
               layout
@@ -366,6 +532,20 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
       </motion.div>
 
       <AnimatePresence>
+        {openMeal && (
+          <MealSheet
+            key={openMeal.id}
+            meal={openMeal}
+            onClose={() => setOpenMeal(null)}
+            onChanged={onMealChanged}
+            onOpenRecipe={openDetail}
+            onDelete={deleteMeal}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* After the meal sheet, so a dish opened from a meal sits on top of it. */}
+      <AnimatePresence>
         {openRecipe && (
           <RecipeDetail
             key={openRecipe.id}
@@ -373,6 +553,10 @@ export function LibraryApp({ initialRecipeId }: { initialRecipeId?: string }) {
             onClose={closeDetail}
             onChanged={onRecipeChanged}
             onDelete={deleteRecipe}
+            onOpenMeal={(id) => {
+              closeDetail();
+              openMealById(id);
+            }}
           />
         )}
       </AnimatePresence>

@@ -19,7 +19,9 @@ export const EMBEDDING_MODEL = "voyage-3.5-lite";
 export const COURSES = ["meals", "appetizers", "sides", "desserts", "drinks", "misc"] as const;
 export type Course = (typeof COURSES)[number];
 export const COURSE_LABELS: Record<Course, string> = {
-  meals: "Meals",
+  // Label only — the stored value stays "meals". "Meals" now names the
+  // Library toggle for saved full meals, so the course reads as Mains.
+  meals: "Mains",
   appetizers: "Appetizers",
   sides: "Sides",
   desserts: "Desserts",

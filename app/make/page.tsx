@@ -8,6 +8,7 @@ import type { Extraction, MakeScope } from "@/lib/schemas";
 import { springSoft, springUI } from "@/lib/springs";
 import { RecipeDetail } from "@/components/RecipeDetail";
 import { GamePlan } from "@/components/GamePlan";
+import { EditableTitle } from "@/components/EditableTitle";
 import { MealDishList, MEAL_ROLE } from "@/components/MealDishList";
 import { normalizeGamePlan, type GamePlanStep } from "@/lib/gamePlan";
 import { AddToListSheet } from "@/components/AddToListSheet";
@@ -67,7 +68,13 @@ const MEAL_LINES = [
   "Putting the game plan together…",
 ];
 
-type Result = { dishes: Extraction[]; game_plan: GamePlanStep[] | null; servings: number };
+type Result = {
+  dishes: Extraction[];
+  game_plan: GamePlanStep[] | null;
+  servings: number;
+  /** The model's suggested name for a meal; null for one dish. */
+  meal_title?: string | null;
+};
 
 type Session = {
   ask: string;
@@ -80,6 +87,10 @@ type Session = {
   answered: string | null;
   /** "19:00" once the cook says when dinner is; null until then. */
   serveTime: string | null;
+  /** A meal's name — the model's suggestion until the cook renames it. */
+  mealTitle: string | null;
+  /** Set once the meal is kept together in the Library. */
+  savedMealId: string | null;
   saved_at: number;
 };
 
@@ -111,6 +122,8 @@ export default function MakePage() {
   const [addOpen, setAddOpen] = useState(false);
   const [addedCount, setAddedCount] = useState<number | null>(null);
   const [serveTime, setServeTime] = useState<string | null>(null);
+  const [mealTitle, setMealTitle] = useState<string | null>(null);
+  const [savedMealId, setSavedMealId] = useState<string | null>(null);
 
   // Only cycles while the box is empty — once you're typing, it's your words.
   useEffect(() => {
@@ -140,6 +153,8 @@ export default function MakePage() {
       setSaved(s.saved ?? []);
       setAnswered(s.answered ?? null);
       setServeTime(s.serveTime ?? null);
+      setMealTitle(s.mealTitle ?? null);
+      setSavedMealId(s.savedMealId ?? null);
     } catch {
       // corrupt/blocked storage — start clean
     }
@@ -152,12 +167,12 @@ export default function MakePage() {
       return;
     }
     try {
-      const s: Session = { ask, maxActive, scope, result, saved, answered, serveTime, saved_at: Date.now() };
+      const s: Session = { ask, maxActive, scope, result, saved, answered, serveTime, mealTitle, savedMealId, saved_at: Date.now() };
       localStorage.setItem(MAKE_SESSION_KEY, JSON.stringify(s));
     } catch {
       // out of quota or private mode — the page just forgets on leave
     }
-  }, [ask, maxActive, scope, result, saved, answered, serveTime]);
+  }, [ask, maxActive, scope, result, saved, answered, serveTime, mealTitle, savedMealId]);
 
   /** The question as one comparable string — the chips are part of it. */
   const question = [ask.trim().toLowerCase(), maxActive ?? ""].join("|");
@@ -173,6 +188,8 @@ export default function MakePage() {
     setError(null);
     setAddedCount(null);
     setServeTime(null);
+    setMealTitle(null);
+    setSavedMealId(null);
   }
 
   async function start() {
@@ -229,6 +246,10 @@ export default function MakePage() {
       const r = json as Result;
       setResult(r);
       setSaved(r.dishes.map(() => null));
+      // A fresh write is a new meal, not an edit of one already saved.
+      setMealTitle(r.meal_title ?? null);
+      setSavedMealId(null);
+      setServeTime(null);
       setAnswered(question);
       // One dish goes straight to the recipe — there's nothing else to look at.
       if (r.dishes.length === 1) setSheet(0);
@@ -327,12 +348,55 @@ export default function MakePage() {
     setError(null);
     // One at a time: a failure stops the run with the rest left as drafts,
     // rather than leaving a half-saved meal you can't see the state of.
+    const rows: (Recipe | null)[] = [];
     for (let i = 0; i < result.dishes.length; i++) {
-      if (saved[i]) continue;
-      const row = await saveDish(i);
-      if (!row) break;
+      rows[i] = saved[i] ?? (await saveDish(i));
+      if (!rows[i]) break;
+    }
+    if (rows.length === result.dishes.length && rows.every(Boolean)) {
+      await keepMeal(rows.map((r) => (r as Recipe).id));
     }
     setSavingAll(false);
+  }
+
+  /**
+   * Keep the meal together in the Library: create it the first time, update it
+   * after a swap (new dish, new plan) rather than making a second copy.
+   */
+  async function keepMeal(recipeIds: string[]) {
+    if (!result) return;
+    const body = {
+      title: (mealTitle ?? "").trim() || result.dishes[0]?.title || "Dinner",
+      request: ask.trim() || null,
+      servings: result.servings,
+      game_plan: result.game_plan,
+      serve_time: serveTime,
+      recipe_ids: recipeIds,
+    };
+    const res = await fetch(savedMealId ? `/api/meals/${savedMealId}` : "/api/meals", {
+      method: savedMealId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(savedMealId ? { ...body, serve_time: serveTime ?? "", request: undefined } : body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(json.error ?? "The recipes saved, but the meal didn't — try Save all again.");
+      return;
+    }
+    setSavedMealId(json.meal.id);
+    if (!mealTitle) setMealTitle(json.meal.title);
+  }
+
+  /** Once the meal is in the Library, a rename or a dinner time saves there too. */
+  function patchSavedMeal(fields: Record<string, unknown>) {
+    if (!savedMealId) return;
+    fetch(`/api/meals/${savedMealId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    }).catch(() => {
+      // It still holds on this page; the Library copy catches up on the next save.
+    });
   }
 
   const allSaved = !!result && result.dishes.length > 0 && saved.length === result.dishes.length && saved.every(Boolean);
@@ -498,6 +562,16 @@ export default function MakePage() {
             <h2 className="font-display text-xs font-bold uppercase tracking-widest text-flame">
               {isMeal ? "Your meal" : "Your recipe"}
             </h2>
+            {isMeal && (
+              <EditableTitle
+                value={mealTitle || result.dishes[0]?.title || "Dinner"}
+                onChange={(t) => {
+                  setMealTitle(t);
+                  patchSavedMeal({ title: t });
+                }}
+                className="mt-1 font-display text-xl font-bold leading-tight"
+              />
+            )}
             <p className="mt-1 text-sm text-smoke">
               {yieldLabel ?? `Serves ${result.servings}`}
             </p>
@@ -515,7 +589,14 @@ export default function MakePage() {
 
             {result.game_plan && (
               <div className="mt-4">
-                <GamePlan steps={result.game_plan} serveTime={serveTime} onServeTimeChange={setServeTime} />
+                <GamePlan
+                  steps={result.game_plan}
+                  serveTime={serveTime}
+                  onServeTimeChange={(t) => {
+                    setServeTime(t);
+                    patchSavedMeal({ serve_time: t ?? "" });
+                  }}
+                />
               </div>
             )}
 
@@ -548,7 +629,19 @@ export default function MakePage() {
                   {addedCount ? `✓ ${addedCount} on the list` : "Add everything to grocery list"}
                 </motion.button>
                 {!allSaved && (
-                  <p className="text-center text-xs text-smoke">Save the meal first, then add it to the list.</p>
+                  <p className="text-center text-xs text-smoke">
+                    {savedMealId
+                      ? "Save the new dish to update the meal in your Library."
+                      : "Save the meal first, then add it to the list."}
+                  </p>
+                )}
+                {allSaved && savedMealId && (
+                  <p className="text-center text-xs text-smoke">
+                    ✓ Kept together in your Library —{" "}
+                    <Link href={`/?meal=${savedMealId}`} className="font-semibold text-char underline underline-offset-2">
+                      open it under Meals
+                    </Link>
+                  </p>
                 )}
               </div>
             )}

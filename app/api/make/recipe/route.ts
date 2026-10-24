@@ -76,6 +76,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     dishes,
     game_plan: meal && result.game_plan?.length ? result.game_plan : null,
+    meal_title: meal ? result.meal_title : null,
     servings,
   });
 }
