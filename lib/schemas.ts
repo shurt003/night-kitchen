@@ -184,36 +184,54 @@ export const MakeSwapSchema = z.object({
   game_plan: GamePlanSchema,
 });
 
-/** Plan the week, step one: the outline every recipe is then written against. */
+/** One night of a planned week — a dinner card before confirming, a recipe slot after. */
+const WeekNightSchema = z.object({
+  night: z.number().int().positive(),
+  label: z.string().default(""),
+  title: z.string().trim().min(1),
+  hook: z.string().default(""),
+  /** The main protein, in plain words, and the prep day it's cooked on (null: cooked that night). */
+  protein: z.string().nullable().catch(null).default(null),
+  protein_from: z.string().nullable().catch(null).default(null),
+  uses: z.array(z.string()).default([]),
+  tonight_min: z.number().int().nonnegative().nullable().catch(null).default(null),
+  kind: z.enum(["cook", "remix", "reheat"]).catch("cook").default("cook"),
+  from_night: z.number().int().positive().nullable().catch(null).default(null),
+});
+
+const WeekComponentSchema = z.object({
+  key: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  makes: z.string().default(""),
+  used_on: z.array(z.number().int().positive()).default([]),
+  prep_day: z.string().nullable().catch(null).default(null),
+});
+
+/** Plan the week, before confirming: the dinner cards. */
+export const WeekDinnersSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  nights: z.array(WeekNightSchema).min(1).max(7),
+});
+
+/** Swapping one dinner card before the week is confirmed. */
+export const WeekDinnerSwapSchema = z.object({ night: WeekNightSchema });
+
+/** Plan the week, on confirm: the prep for the approved dinners. */
+export const WeekPrepSchema = z.object({
+  components: z.array(WeekComponentSchema).max(6).default([]),
+  uses: z
+    .array(z.object({ night: z.number().int().positive(), keys: z.array(z.string()).default([]) }))
+    .default([]),
+  prep_sessions: z
+    .array(z.object({ day: z.string().nullable().catch(null).default(null), plan: GamePlanSchema.transform((p) => p ?? []) }))
+    .default([]),
+});
+
+/** A whole planned week: what every recipe is written against, and what a saved week keeps. */
 export const WeekOutlineSchema = z.object({
   title: z.string().trim().min(1).max(120),
-  components: z
-    .array(
-      z.object({
-        key: z.string().trim().min(1),
-        title: z.string().trim().min(1),
-        makes: z.string().default(""),
-        used_on: z.array(z.number().int().positive()).default([]),
-        prep_day: z.string().nullable().catch(null).default(null),
-      })
-    )
-    .max(5)
-    .default([]),
-  nights: z
-    .array(
-      z.object({
-        night: z.number().int().positive(),
-        label: z.string().default(""),
-        title: z.string().trim().min(1),
-        hook: z.string().default(""),
-        uses: z.array(z.string()).default([]),
-        tonight_min: z.number().int().nonnegative().nullable().catch(null).default(null),
-        kind: z.enum(["cook", "remix", "reheat"]).catch("cook").default("cook"),
-        from_night: z.number().int().positive().nullable().catch(null).default(null),
-      })
-    )
-    .min(1)
-    .max(7),
+  components: z.array(WeekComponentSchema).max(6).default([]),
+  nights: z.array(WeekNightSchema).min(1).max(7),
   /** One bulk-cooking session per prep day (day null when there's no prep day). */
   prep_sessions: z
     .array(z.object({ day: z.string().nullable().catch(null).default(null), plan: GamePlanSchema.transform((p) => p ?? []) }))
@@ -227,7 +245,7 @@ export const WeekOutlineSchema = z.object({
 
 /** Swapping one night of a week: its new outline entry and (unless it's a reheat) its recipe. */
 export const WeekSwapSchema = z.object({
-  night: WeekOutlineSchema.shape.nights.element,
+  night: WeekNightSchema,
   recipe: ExtractionSchema.nullable().default(null),
 });
 

@@ -353,35 +353,87 @@ Respond with ONLY JSON:
 // ---------------------------------------------------------------------------
 
 /**
- * Plan the week, step one: the shape of the whole week before any recipe is
- * written — what's cooked in bulk, what each night is, and how leftovers
- * travel. Every recipe is then written against this, in parallel.
+ * The rule that keeps a planned week safe and makes prep days worth having:
+ * meat is cooked on prep days and carried forward, never bought raw to sit in
+ * the fridge for a late-week night. Shared by every step that plans a night.
  */
-export const WEEK_OUTLINE_SYSTEM = `You plan someone's dinners for the coming nights. Shopping is fine — they'll do one shop for the whole stretch. Plan only; recipes are written afterwards, one per item, against your plan.
+const WEEK_PROTEIN_RULES = `Protein and freshness:
+- With prep days: every meat, poultry and fish is cooked on a prep day, and each prep day feeds every night up to the next prep day. A night's protein comes from the most recent prep day on or before it — "protein_from" is that day. Never plan raw meat, poultry or fish to be bought and cooked on a night that isn't a prep day.
+- Cooked meat keeps about 4 days: everything a prep day cooks is eaten within 3 days after it. When a prep day covers several nights, cook enough for all of them — two proteins on one prep day is fine for variety.
+- Fish and seafood don't keep once cooked: only on a prep day's own night.
+- Without prep days: assume one shop just before night 1. Raw meat, poultry and fish keep 1–2 days in the fridge, so plan them for the first two or three nights; later nights lean on leftovers, eggs, beans, frozen or cured things. "protein_from" is null.
+- A meat-free night is fine; its "protein" is what carries it ("chickpeas", "eggs"), with "protein_from" null unless it's cooked on a prep day.
+- Never use anything they've ruled out ("no shrimp" means none, anywhere).`;
 
-You are given "request" (their words), "nights" (how many dinners), "night_labels" (the weekday each night falls on, in order), "people" (how many each dinner feeds), "prep_days" (the days they'll cook in bulk — each one is also a night in "night_labels", and they eat that night too — or empty), and "staples" (things they always keep in).
+/**
+ * Plan the week, step one: just the dinners — one card per night — for the
+ * cook to look over, swap and confirm. Nothing about the prep is worked out
+ * until they confirm.
+ */
+export const WEEK_DINNERS_SYSTEM = `You plan someone's dinners for the coming nights. They'll look over your plan, swap what they don't like, and confirm; only then is the prep worked out and the recipes written. Plan the dinners only.
+
+You are given "request" (their words), "nights" (how many dinners), "night_labels" (the weekday each night falls on, in order), "people" (how many each dinner feeds), "prep_days" (the days they'll cook in bulk — each is also a night, and they eat that night too — or empty), and "staples" (things they always keep in).
 
 Plan:
-- One dinner per night, exactly "nights" of them, labelled with "night_labels" in order. Real variety across the stretch — different cuisines, proteins and textures, not one dish five ways — unless they asked otherwise.
-- "components": things cooked in bulk once and used on several nights — a tray of roasted vegetables, a pot of grains, a sauce, a batch of protein. 0–5 of them, only where they genuinely save work; follow the request when it names one ("a tray of veggies"). Each gets a short "key" ("c1", "c2"), a "title", what the batch "makes" ("2 sheet pans, about 8 cups"), "used_on" (the night numbers that use it), and "prep_day" (which of "prep_days" it's cooked on — null when "prep_days" is empty, meaning it's cooked on the first night). A component used on only one night isn't a component — fold it into that night.
-- With several prep days, spread the work: each component is cooked on a prep day on or before the first night that uses it, and close enough to its last night to keep well (cooked vegetables and proteins for about 3–4 days). A second prep day restocks the back half of the week — a fresh tray of vegetables, a new protein — rather than sitting idle.
-- Cook once, eat twice: over more than 3 nights, plan at least one night that's built from an earlier night's leftovers. Prefer a "remix" (leftover braise → ragu over pasta) to a plain "reheat"; at most one plain reheat. Give such nights "kind" "remix" or "reheat" and "from_night" (the night the leftovers come from); that earlier night then cooks enough for both.
-- "tonight_min": honest hands-on minutes that night, counting components as already cooked. Keep weeknights quick — around 30 minutes or less — unless they asked for something bigger.
-- "uses": the component keys a night draws on.
-- "hook": one plain line on what it is and why it works ("Charred veg tray, a jammy egg and chili crisp over rice").
-- "prep_sessions": one per prep day that has components, in week order — { "day": the prep day (null when "prep_days" is empty), "plan": the session in order: what goes in the oven first, what happens while it roasts, how to cool and store — 3–7 steps, each { "offset_min": null, "label": short timing in words ("Start", "While that roasts", "To finish"), "text" } }. Empty when there are no components.
-- "title": a plain name for the stretch ("Veggie-tray week").
+- One dinner per night, exactly "nights" of them, labelled with "night_labels" in order. Follow everything the request asks for — named proteins, vegetables, dishes, things to avoid. Real variety across the stretch otherwise: different cuisines, flavours and forms, not one dish five ways.
+- Anything they want cooked in bulk ("sheet tray veggies") is for the week, not one night: work it into most of the dinners its prep day covers, in different ways (a side one night, tossed through pasta the next, in a fried rice after that).
+- Cook once, eat twice: over more than 3 nights, plan at least one night built from an earlier night's leftovers. Prefer a "remix" (leftover braise → ragu over pasta) to a plain "reheat"; at most one plain reheat. Such nights get "kind" "remix" or "reheat" and "from_night" (the night the leftovers come from).
+- "protein": the main protein in plain words ("cumin beef crumble", "soy-ginger chicken thighs").
+- "tonight_min": honest hands-on minutes that night, counting whatever was cooked on a prep day as done. Keep weeknights quick — around 30 minutes or less — unless they asked for more.
+- "hook": one plain line on what it is ("Cumin beef, crispy gnocchi and charred veg").
+- "title": a plain name for the stretch ("Chicken, beef and two veg trays").
+
+${WEEK_PROTEIN_RULES}
+
+Respond with ONLY JSON:
+{
+  "title": "...",
+  "nights": [
+    { "night": 1, "label": "Sun", "title": "Soy-ginger chicken thighs with roasted veg and rice", "hook": "...", "protein": "soy-ginger chicken thighs", "protein_from": "Sun", "tonight_min": 15, "kind": "cook", "from_night": null }
+  ]
+}`;
+
+/** Plan the week, before confirming: swap one dinner card for another. */
+export const WEEK_DINNER_SWAP_SYSTEM = `You're replacing one dinner in a week someone is still planning. They'll confirm the week before any prep is worked out or recipe written — so this is just the new dinner card.
+
+You are given "request" (their original words), "nights" (every dinner planned so far), "replace" (the night number to swap), "hint" (what they'd like instead — may be empty), "people", "prep_days", and "staples".
+
+- Plan a genuinely different dinner for that night — not a variation of the one it replaces — and different from every other night.
+- Follow the hint when there is one ("something lighter", "no oven", "tacos"). With no hint, pick what suits the week best.
+- If another night is a remix or reheat of this one, keep the new dinner something that can still feed that night, and say so in its hook.
+- Keep "night" and "label" as they are.
+
+${WEEK_PROTEIN_RULES}
+
+Respond with ONLY JSON:
+{ "night": { "night": 3, "label": "Tue", "title": "...", "hook": "...", "protein": "...", "protein_from": "Sun", "tonight_min": 20, "kind": "cook", "from_night": null } }`;
+
+/**
+ * Plan the week, on confirm: the prep worked out from the approved dinners —
+ * what each prep day cooks, how much, and the session to cook it in.
+ */
+export const WEEK_PREP_SYSTEM = `Someone has approved their dinners for the coming nights. Work out what gets cooked ahead so those exact dinners come together quickly. Recipes are written afterwards, against your plan.
+
+You are given "request" (their original words), "nights" (the approved dinners, each with its "protein" and "protein_from" prep day), "people", "prep_days" (or empty), and "staples".
+
+Plan:
+- "components": things cooked ahead and used on later nights — every protein that comes from a prep day, plus vegetable trays, grains or sauces where they genuinely save work (and always anything the request names, like "a tray of veggies"). 0–6 of them. Each gets a short "key" ("c1"), a "title", what the batch "makes" ("2 lb, about 6 servings"), "used_on" (the night numbers that use it), and "prep_day" (the prep day it's cooked on — null when "prep_days" is empty, meaning it's cooked on the first night).
+- Every night's prepped protein must be a component cooked on that night's "protein_from" day, sized for every night that uses it at "people" each. A prep-day protein used on only one later night is still a component.
+- Nothing a prep day cooks is used more than 3 days after it. With several prep days, each restocks the nights up to the next one — a fresh vegetable tray, a new protein — rather than stretching the first.
+- A vegetable tray (or grain, or sauce) is sized for the week, not one dinner: use it on most of the nights its prep day covers wherever it fits the dish, and size it for all of them.
+- "uses": for every night, the component keys it draws on: [{ "night": 1, "keys": ["c1", "c2"] }].
+- "prep_sessions": one per prep day that has components, in week order — { "day", "plan": the session in order (what goes in the oven first, what happens while it roasts, how to cool and store), 3–7 steps, each { "offset_min": null, "label": short timing in words ("Start", "While that roasts", "Cool and store"), "text" } }. With no prep days, one session with "day" null for whatever is cooked ahead on the first night, or none.
+- Don't change the dinners.
+
+${WEEK_PROTEIN_RULES}
 
 ${MAKE_PRINCIPLES}
 
 Respond with ONLY JSON:
 {
-  "title": "Veggie-tray week",
-  "components": [ { "key": "c1", "title": "Roasted vegetable tray", "makes": "2 sheet pans, about 8 cups", "used_on": [1, 3, 4], "prep_day": "Sun" } ],
-  "nights": [
-    { "night": 1, "label": "Sun", "title": "Soy-ginger chicken thighs with rice", "hook": "...", "uses": ["c1"], "tonight_min": 25, "kind": "cook", "from_night": null }
-  ],
-  "prep_sessions": [ { "day": "Sun", "plan": [ { "offset_min": null, "label": "Start", "text": "Heat the oven to 425°F and..." } ] } ]
+  "components": [ { "key": "c1", "title": "Soy-ginger chicken thighs, bulk-roasted", "makes": "2 lb, about 6 servings", "used_on": [1, 3], "prep_day": "Sun" } ],
+  "uses": [ { "night": 1, "keys": ["c1"] } ],
+  "prep_sessions": [ { "day": "Sun", "plan": [ { "offset_min": null, "label": "Start", "text": "Heat the oven to 425°F..." } ] } ]
 }`;
 
 /** Plan the week, step two: one recipe — a bulk component, or one night's dinner. */
@@ -416,7 +468,7 @@ You are given "request" (their original words), "outline" (the whole week's plan
 Rules:
 - Plan a genuinely different dinner for that night — not a variation of the one it replaces — and different from every other night in the week.
 - Follow the hint when there is one ("something lighter", "no oven", a specific dish). With no hint, pick what suits the week best.
-- It may use the week's existing components (by key) but cannot add new ones. If another night is a "remix" or "reheat" of the night being replaced, keep the new dinner cookable in a quantity that still feeds that night, and say so.
+- It may use the week's existing components (by key) but cannot add new ones. When the week has prep days (components with a "prep_day"), the new dinner's meat or fish must come from a component cooked on that night's prep day or an earlier one — never raw meat bought for a night that isn't a prep day. If another night is a "remix" or "reheat" of the night being replaced, keep the new dinner cookable in a quantity that still feeds that night, and say so.
 - Return the new outline entry for that night ("night" and "label" unchanged) as "night", and — unless its "kind" is "reheat" — its full recipe as "recipe", written exactly as a night's recipe is: for "people", components listed in the section "${MADE_AHEAD_SECTION}", only tonight's steps.
 ${MAKE_DISH_CRAFT}
 

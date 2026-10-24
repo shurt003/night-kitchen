@@ -18,6 +18,7 @@ export type WeekSlot = { state: "ready"; saved: boolean } | { state: "failed" } 
  */
 export function WeekView({
   outline,
+  draft = false,
   componentSlot,
   nightSlot,
   onOpenComponent,
@@ -26,6 +27,11 @@ export function WeekView({
   onRetry,
 }: {
   outline: WeekOutline;
+  /**
+   * Before the week is confirmed: dinner cards only — no prep, no recipes yet
+   * — so each card shows its protein and prep day, and only Swap does anything.
+   */
+  draft?: boolean;
   componentSlot: (key: string) => WeekSlot;
   nightSlot: (night: number) => WeekSlot;
   onOpenComponent: (key: string) => void;
@@ -107,7 +113,7 @@ export function WeekView({
                 onClick={() =>
                   slot.state === "failed" ? onRetry?.({ night: n.night }) : !reheat && onOpenNight(n.night)
                 }
-                disabled={reheat || slot.state === "missing"}
+                disabled={draft || reheat || slot.state === "missing"}
                 className="flex w-full gap-3 p-3 pb-2 text-left disabled:cursor-default"
               >
                 <span className="w-10 shrink-0 pt-0.5 font-display text-sm font-bold uppercase text-flame">
@@ -120,8 +126,15 @@ export function WeekView({
               </button>
               {/* One trimmed line rather than chips: prep items have long names
                   ("Charred roasted vegetable tray") that wrapped into a tall stack. */}
-              {uses.length > 0 && (
+              {uses.length > 0 ? (
                 <p className="truncate px-3 pl-[64px] text-xs text-smoke">Uses {uses.join(" · ")}</p>
+              ) : (
+                n.protein && (
+                  <p className="truncate px-3 pl-[64px] text-xs text-smoke">
+                    <span className="capitalize">{n.protein}</span>
+                    {n.protein_from && n.kind === "cook" ? ` · cooked ${n.protein_from}` : ""}
+                  </p>
+                )
               )}
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 pb-3 pl-[64px] pt-1.5 text-xs">
                 {n.tonight_min != null && <span className="text-smoke">{n.tonight_min} min tonight</span>}
@@ -130,7 +143,7 @@ export function WeekView({
                     {reheat ? `Leftovers from ${labelOf(n.from_night)}` : `Remix of ${labelOf(n.from_night)}`}
                   </span>
                 )}
-                {!reheat && <SlotNote slot={slot} />}
+                {!reheat && !draft && <SlotNote slot={slot} />}
                 {onSwapNight && (
                   <button
                     onClick={() => setSwapAt((cur) => (cur === n.night ? null : n.night))}

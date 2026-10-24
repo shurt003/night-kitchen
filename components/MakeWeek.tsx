@@ -32,6 +32,11 @@ type Week = {
   prepDays: string[];
   outline: WeekOutline;
   recipes: Record<string, Written>;
+  /**
+   * False while it's dinner cards to look over and swap; true once the cook
+   * confirms and the prep and every recipe are written.
+   */
+  confirmed: boolean;
 };
 type Job = { ref: string; label: string; write: { component: string } | { night: number } };
 type Progress = { ref: string; label: string; state: "pending" | "done" | "failed" };
@@ -39,6 +44,13 @@ type Progress = { ref: string; label: string; state: "pending" | "done" | "faile
 /** How many recipes are written at once — fast, without flooding the API. */
 const CONCURRENCY = 6;
 const SESSION_TTL = 12 * 60 * 60 * 1000;
+
+const PREP_LINES = [
+  "Working out the prep…",
+  "Sizing the batches…",
+  "Timing the oven…",
+  "Checking what keeps…",
+];
 
 const PLANNING_LINES = [
   "Looking at the whole week…",
@@ -77,7 +89,7 @@ export function MakeWeek({
   const [title, setTitle] = useState<string | null>(null);
   const [mealId, setMealId] = useState<string | null>(null);
 
-  const [phase, setPhase] = useState<null | "planning" | "writing">(null);
+  const [phase, setPhase] = useState<null | "planning" | "prepping" | "writing">(null);
   const [progress, setProgress] = useState<Progress[]>([]);
   const [swapping, setSwapping] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +120,8 @@ export function MakeWeek({
       setPeople(s.people ?? 2);
       // An older session held one prep day.
       setPrepDays(Array.isArray(s.prepDays) ? s.prepDays : s.prepDay ? [s.prepDay] : []);
-      setWeek(s.week ?? null);
+      // A week from before the confirm step already has its recipes.
+      setWeek(s.week ? { ...s.week, confirmed: s.week.confirmed ?? true } : null);
       setSaved(s.saved ?? {});
       setTitle(s.title ?? null);
       setMealId(s.mealId ?? null);
@@ -161,6 +174,7 @@ export function MakeWeek({
     }
   }
 
+  /** Step one: the dinner cards, to look over and swap before anything is written. */
   async function planWeek() {
     if (!ask.trim() || phase) return;
     const controller = new AbortController();
@@ -169,7 +183,7 @@ export function MakeWeek({
     setAddedCount(null);
     setPhase("planning");
     try {
-      const res = await fetch("/api/make/week/outline", {
+      const res = await fetch("/api/make/week/dinners", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request: ask, nights, people, prep_days: prepDays, today_dow: new Date().getDay() }),
@@ -177,10 +191,41 @@ export function MakeWeek({
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Couldn't plan that week.");
-      const draft: Week = { request: ask.trim(), people, prepDays, outline: json.outline, recipes: {} };
+      setWeek({ request: ask.trim(), people, prepDays, outline: json.outline, recipes: {}, confirmed: false });
+      setSaved({});
+      setTitle(json.outline.title);
+      setMealId(null);
+    } catch (e) {
+      // Cancelling is a choice, not a failure — no banner for it.
+      if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Couldn't plan that week.");
+    } finally {
+      abort.current = null;
+      setPhase(null);
+    }
+  }
 
-      // Every recipe at once (a few at a time), each against the outline.
-      const jobs = jobsFor(draft.outline);
+  /**
+   * Step two, on confirm: work out the prep for the dinners as they stand,
+   * then write every recipe (a few at a time) against it.
+   */
+  async function confirmWeek() {
+    if (!week || week.confirmed || phase) return;
+    const controller = new AbortController();
+    abort.current = controller;
+    setError(null);
+    setPhase("prepping");
+    try {
+      const res = await fetch("/api/make/week/prep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: week.request, outline: week.outline, people: week.people }),
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't work out the prep.");
+      const ready: Week = { ...week, outline: json.outline, recipes: {}, confirmed: true };
+
+      const jobs = jobsFor(ready.outline);
       setProgress(jobs.map((j) => ({ ref: j.ref, label: j.label, state: "pending" })));
       setPhase("writing");
       const recipes: Record<string, Written> = {};
@@ -188,7 +233,7 @@ export function MakeWeek({
       const worker = async () => {
         while (next < jobs.length) {
           const job = jobs[next++];
-          const r = await writeOne(draft, job, controller.signal);
+          const r = await writeOne(ready, job, controller.signal);
           recipes[job.ref] = r;
           setProgress((p) => p.map((x) => (x.ref === job.ref ? { ...x, state: r === "failed" ? "failed" : "done" } : x)));
         }
@@ -198,13 +243,10 @@ export function MakeWeek({
       if (jobs.length && jobs.every((j) => recipes[j.ref] === "failed")) {
         throw new Error("None of the recipes would write — try again.");
       }
-      setWeek({ ...draft, recipes });
-      setSaved({});
-      setTitle(draft.outline.title);
-      setMealId(null);
+      setWeek({ ...ready, recipes });
     } catch (e) {
-      // Cancelling is a choice, not a failure — no banner for it.
-      if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Couldn't plan that week.");
+      // Cancelling leaves the dinner cards as they were, still unconfirmed.
+      if ((e as Error).name !== "AbortError") setError(e instanceof Error ? e.message : "Couldn't finish the week.");
     } finally {
       abort.current = null;
       setPhase(null);
@@ -234,6 +276,26 @@ export function MakeWeek({
     const label = week.outline.nights.find((n) => n.night === night)?.label ?? "";
     setSwapping(`A new ${label} dinner`);
     setError(null);
+    if (!week.confirmed) {
+      // Before confirming it's just the card — no prep or recipe to redo yet.
+      try {
+        const res = await fetch("/api/make/week/dinner-swap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ request: week.request, outline: week.outline, night, hint, people: week.people }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? "Couldn't swap that night.");
+        setWeek((w) =>
+          w ? { ...w, outline: { ...w.outline, nights: w.outline.nights.map((n) => (n.night === night ? json.night : n)) } } : w
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't swap that night.");
+      } finally {
+        setSwapping(null);
+      }
+      return;
+    }
     try {
       const res = await fetch("/api/make/week/swap", {
         method: "POST",
@@ -427,26 +489,44 @@ export function MakeWeek({
             {week.outline.nights.length} nights · {week.people} {week.people === 1 ? "person" : "people"}
           </p>
 
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            transition={springUI}
-            onClick={addEverything}
-            disabled={savingWeek}
-            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3 font-display font-bold disabled:opacity-60 ${
-              addedCount ? "bg-herb text-chalk" : "bg-flame text-accent-ink"
-            }`}
-          >
-            {savingWeek && <Spinner className="h-4 w-4" />}
-            {savingWeek
-              ? "Saving the week…"
-              : addedCount
-                ? `✓ ${addedCount} on the list`
-                : "Add everything to grocery list"}
-          </motion.button>
+          {!week.confirmed ? (
+            <>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                transition={springUI}
+                onClick={confirmWeek}
+                disabled={!!phase || !!swapping}
+                className="mt-3 w-full rounded-xl bg-flame py-3 font-display font-bold text-accent-ink disabled:opacity-60"
+              >
+                Confirm the week
+              </motion.button>
+              <p className="mt-1.5 text-center text-xs text-smoke">
+                Swap anything you don&apos;t love first. Confirming works out the prep and writes every recipe.
+              </p>
+            </>
+          ) : (
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              transition={springUI}
+              onClick={addEverything}
+              disabled={savingWeek}
+              className={`mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3 font-display font-bold disabled:opacity-60 ${
+                addedCount ? "bg-herb text-chalk" : "bg-flame text-accent-ink"
+              }`}
+            >
+              {savingWeek && <Spinner className="h-4 w-4" />}
+              {savingWeek
+                ? "Saving the week…"
+                : addedCount
+                  ? `✓ ${addedCount} on the list`
+                  : "Add everything to grocery list"}
+            </motion.button>
+          )}
 
           <div className="mt-4">
             <WeekView
               outline={week.outline}
+              draft={!week.confirmed}
               componentSlot={(k) => slot(`c:${k}`)}
               nightSlot={(n) => slot(`n:${n}`)}
               onOpenComponent={(k) => setSheet(`c:${k}`)}
@@ -456,28 +536,30 @@ export function MakeWeek({
             />
           </div>
 
-          <div className="mt-4 space-y-2">
-            {!allSaved && (
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                transition={springUI}
-                onClick={saveWeek}
-                disabled={savingWeek}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-char py-3 font-display font-bold text-tile disabled:opacity-50"
-              >
-                {savingWeek && <Spinner className="h-4 w-4" />}
-                {savingWeek ? "Saving…" : mealId ? "Save the changes" : "Save the week"}
-              </motion.button>
-            )}
-            {allSaved && mealId && (
-              <p className="text-center text-xs text-smoke">
-                ✓ Kept together in your Library —{" "}
-                <Link href={`/?meal=${mealId}`} className="font-semibold text-char underline underline-offset-2">
-                  open it under Meals
-                </Link>
-              </p>
-            )}
-          </div>
+          {week.confirmed && (
+            <div className="mt-4 space-y-2">
+              {!allSaved && (
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  transition={springUI}
+                  onClick={saveWeek}
+                  disabled={savingWeek}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-char py-3 font-display font-bold text-tile disabled:opacity-50"
+                >
+                  {savingWeek && <Spinner className="h-4 w-4" />}
+                  {savingWeek ? "Saving…" : mealId ? "Save the changes" : "Save the week"}
+                </motion.button>
+              )}
+              {allSaved && mealId && (
+                <p className="text-center text-xs text-smoke">
+                  ✓ Kept together in your Library —{" "}
+                  <Link href={`/?meal=${mealId}`} className="font-semibold text-char underline underline-offset-2">
+                    open it under Meals
+                  </Link>
+                </p>
+              )}
+            </div>
+          )}
         </motion.section>
       )}
 
@@ -527,8 +609,13 @@ export function MakeWeek({
               ) : (
                 <div className="text-center">
                   <Spinner className="mx-auto h-7 w-7 text-flame" />
-                  <p className="mt-3 font-display text-lg font-bold leading-tight">{swapping ?? "Planning your week"}</p>
-                  <CyclingLine lines={PLANNING_LINES} className="mt-1 h-5 text-sm text-smoke" />
+                  <p className="mt-3 font-display text-lg font-bold leading-tight">
+                    {swapping ?? (phase === "prepping" ? "Working out the prep" : "Planning your dinners")}
+                  </p>
+                  <CyclingLine
+                    lines={phase === "prepping" ? PREP_LINES : PLANNING_LINES}
+                    className="mt-1 h-5 text-sm text-smoke"
+                  />
                 </div>
               )}
               {phase && (

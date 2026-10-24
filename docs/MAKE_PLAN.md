@@ -351,6 +351,28 @@ people): Sunday stocked Sun–Tue (veg tray + chicken braise), Wednesday
 restocked Wed–Fri (fresh tray + taco filling), one session each; outline
 took 55s.
 
+**Owner change (2026-10-24, second use): dinners first, confirm, then prep.**
+A Sun + Wed week cooked beef on Wednesday for Wed–Thu only, then planned fresh
+chicken cooked on Friday and Saturday — raw meat bought Sunday waiting all
+week, and not what was asked. Two changes:
+- **Protein rule** (`WEEK_PROTEIN_RULES`, used by every planning step): with
+  prep days, all meat and fish is cooked on a prep day; each prep day feeds
+  every night up to the next; nothing is eaten more than 3 days after its
+  prep day; seafood only on a prep day's own night; without prep days, raw
+  meat only in the first 2–3 nights. Each night carries `protein` and
+  `protein_from`, which `settleNights` corrects if the model names a bad day.
+  Bulk items the request names ("sheet tray veggies") are used across the
+  nights their prep day covers, not once.
+- **Flow:** Plan my week → dinner cards only (`/api/make/week/dinners`,
+  ~30s) → swap any card (`/api/make/week/dinner-swap`, ~2s, card only) →
+  **Confirm the week** → prep worked out from the confirmed dinners
+  (`/api/make/week/prep`, ~30s) → every recipe written in parallel, as
+  before. The one-shot `/api/make/week/outline` is gone.
+- Live test (the owner's request: Sun + Wed, sheet tray veggies, chicken
+  thighs and ground beef, no shrimp, meat every night, 7 nights, 3 people):
+  no meat cooked on a non-prep night; Wednesday covered Wed–Sat; nothing
+  eaten more than 3 days after prep; no shrimp; Sunday's trays used Sun–Tue.
+
 **Phone checklist (draft):** switch to Plan the week, pick 5 nights, 2
 people, Sun prep, type the veggie-tray request; check the prep card, five
 night cards with weekdays, and that swapping one night changes only that

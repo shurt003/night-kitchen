@@ -30,6 +30,9 @@ export type WeekNight = {
   uses: string[];
   /** Hands-on cooking that night, in minutes. */
   tonight_min: number | null;
+  /** The main protein, and the prep day it's cooked on (null: that night). */
+  protein?: string | null;
+  protein_from?: string | null;
   kind: "cook" | "remix" | "reheat";
   from_night: number | null;
 };
@@ -92,4 +95,41 @@ export function usesTitles(outline: WeekOutline, night: WeekNight): string[] {
   return night.uses
     .map((k) => outline.components.find((c) => c.key === k)?.title)
     .filter((t): t is string => !!t);
+}
+
+/**
+ * Hold planned nights to the shape asked for: in order, under our weekday
+ * labels, leftovers pointing only backwards, and each night's protein coming
+ * from a chosen prep day on or before it (the most recent one when the model
+ * named another). Without prep days, nothing comes "from" a prep day.
+ */
+export function settleNights<N extends WeekNight>(nights: N[], labels: string[], prepDays: string[]): N[] {
+  return nights.slice(0, labels.length).map((n, i) => {
+    const night = i + 1;
+    const from = n.from_night && n.from_night < night ? n.from_night : null;
+    const earlierPrep = labels.slice(0, night).filter((l) => prepDays.includes(l));
+    const protein_from = !prepDays.length || !n.protein
+      ? null
+      : n.protein_from && earlierPrep.includes(n.protein_from)
+        ? n.protein_from
+        : (earlierPrep[earlierPrep.length - 1] ?? null);
+    return {
+      ...n,
+      night,
+      label: labels[i],
+      from_night: from,
+      kind: n.kind !== "cook" && !from ? "cook" : n.kind,
+      protein_from,
+    };
+  });
+}
+
+/** The labels and in-range prep days for a request, from the cook's local weekday. */
+export function weekFrame(nights: number, chosen: string[], todayDow: number | null) {
+  const today = new Date();
+  if (todayDow !== null) today.setDate(today.getDate() + ((todayDow - today.getDay() + 7) % 7));
+  const labels = nightLabels(nights, chosen, today);
+  // A prep day outside the stretch can't be cooked on — keep the ones inside it, in week order.
+  const prepDays = labels.filter((l, i, a) => chosen.includes(l) && a.indexOf(l) === i);
+  return { labels, prepDays };
 }
