@@ -7,6 +7,9 @@ import type { Recipe } from "@/lib/types";
 import type { Extraction, MakeScope } from "@/lib/schemas";
 import { springSoft, springUI } from "@/lib/springs";
 import { RecipeDetail } from "@/components/RecipeDetail";
+import { GamePlan } from "@/components/GamePlan";
+import { MealDishList, MEAL_ROLE } from "@/components/MealDishList";
+import { normalizeGamePlan, type GamePlanStep } from "@/lib/gamePlan";
 import { AddToListSheet } from "@/components/AddToListSheet";
 import { Spinner } from "@/components/Spinner";
 import { CyclingLine } from "@/components/CyclingLine";
@@ -46,32 +49,6 @@ const TIMES: { label: string; max: number | null }[] = [
 
 const SERVING_CHOICES = [1, 2, 4, 6, 8];
 
-/** A meal's dishes are labelled by their place in it, not the library's course pills. */
-const MEAL_ROLE: Record<string, string> = {
-  meals: "Main",
-  sides: "Side",
-  appetizers: "Starter",
-  desserts: "Dessert",
-  drinks: "Drink",
-  misc: "",
-};
-
-/** Braises run for hours — "4h" reads at a glance where "240m" makes you divide. */
-function formatMinutes(min: number): string {
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
-}
-
-/** "2 hours before: sear the ribs" → the timing, bolded, then the step. */
-function splitTiming(step: string): [string | null, string] {
-  const at = step.indexOf(":");
-  // Only a short lead-in counts as a timing — not a colon deep in a sentence.
-  if (at > 0 && at <= 24) return [step.slice(0, at + 1), step.slice(at + 1).trim()];
-  return [null, step];
-}
-
 /** Kitchen noises for the long wait — not a progress report, and not pretending to be one. */
 const WRITING_LINES = [
   "Reading up on it…",
@@ -90,11 +67,10 @@ const MEAL_LINES = [
   "Putting the game plan together…",
 ];
 
-type Result = { dishes: Extraction[]; game_plan: string[] | null; servings: number };
+type Result = { dishes: Extraction[]; game_plan: GamePlanStep[] | null; servings: number };
 
 type Session = {
   ask: string;
-  meal: boolean;
   maxActive: number | null;
   scope: MakeScope | null;
   result: Result | null;
@@ -102,6 +78,8 @@ type Session = {
   saved: (Recipe | null)[];
   /** What the result answers, so the button can say "another version". */
   answered: string | null;
+  /** "19:00" once the cook says when dinner is; null until then. */
+  serveTime: string | null;
   saved_at: number;
 };
 
@@ -110,7 +88,6 @@ const SESSION_TTL = 12 * 60 * 60 * 1000;
 
 export default function MakePage() {
   const [ask, setAsk] = useState("");
-  const [meal, setMeal] = useState(false);
   const [maxActive, setMaxActive] = useState<number | null>(null);
   const [example, setExample] = useState(0);
   const askRef = useRef<HTMLTextAreaElement | null>(null);
@@ -133,6 +110,7 @@ export default function MakePage() {
   const [savingAll, setSavingAll] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [addedCount, setAddedCount] = useState<number | null>(null);
+  const [serveTime, setServeTime] = useState<string | null>(null);
 
   // Only cycles while the box is empty — once you're typing, it's your words.
   useEffect(() => {
@@ -154,12 +132,14 @@ export default function MakePage() {
       const s = JSON.parse(raw) as Partial<Session>;
       if (!s.saved_at || Date.now() - s.saved_at > SESSION_TTL) return;
       setAsk(s.ask ?? "");
-      setMeal(!!s.meal);
       setMaxActive(s.maxActive ?? null);
       setScope(s.scope ?? null);
-      setResult(s.result ?? null);
+      // A session stored before the plan was structured holds plain strings —
+      // normalize so it still renders (and can take a dinner time).
+      setResult(s.result ? { ...s.result, game_plan: normalizeGamePlan(s.result.game_plan) } : null);
       setSaved(s.saved ?? []);
       setAnswered(s.answered ?? null);
+      setServeTime(s.serveTime ?? null);
     } catch {
       // corrupt/blocked storage — start clean
     }
@@ -172,15 +152,15 @@ export default function MakePage() {
       return;
     }
     try {
-      const s: Session = { ask, meal, maxActive, scope, result, saved, answered, saved_at: Date.now() };
+      const s: Session = { ask, maxActive, scope, result, saved, answered, serveTime, saved_at: Date.now() };
       localStorage.setItem(MAKE_SESSION_KEY, JSON.stringify(s));
     } catch {
       // out of quota or private mode — the page just forgets on leave
     }
-  }, [ask, meal, maxActive, scope, result, saved, answered]);
+  }, [ask, maxActive, scope, result, saved, answered, serveTime]);
 
   /** The question as one comparable string — the chips are part of it. */
-  const question = [ask.trim().toLowerCase(), meal, maxActive ?? ""].join("|");
+  const question = [ask.trim().toLowerCase(), maxActive ?? ""].join("|");
   const sameQuestion = answered !== null && answered === question;
   const busy = scoping || !!writing;
 
@@ -192,6 +172,7 @@ export default function MakePage() {
     setAskServings(false);
     setError(null);
     setAddedCount(null);
+    setServeTime(null);
   }
 
   async function start() {
@@ -211,7 +192,7 @@ export default function MakePage() {
       const res = await fetch("/api/make/scope", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request: ask, whole_meal: meal }),
+        body: JSON.stringify({ request: ask }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Couldn't read that.");
@@ -255,6 +236,56 @@ export default function MakePage() {
       // Cancelling is a choice, not a failure — no banner for it.
       if ((e as Error).name !== "AbortError") {
         setError(e instanceof Error ? e.message : "Couldn't write that one out.");
+      }
+    } finally {
+      writeAbort.current = null;
+      setWriting(null);
+    }
+  }
+
+  /**
+   * Replace one dish of the meal and take the game plan rewritten around it.
+   * The new dish is a draft; a saved copy of the old one stays in the library
+   * (a swap never deletes anything).
+   */
+  async function swap(i: number, hint: string) {
+    if (!result || busy) return;
+    const role = MEAL_ROLE[result.dishes[i]?.course] ?? "";
+    const controller = new AbortController();
+    writeAbort.current = controller;
+    setWriting(`A new ${role ? role.toLowerCase() : "dish"}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/make/swap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request: ask,
+          dishes: result.dishes,
+          index: i,
+          hint,
+          servings: result.servings,
+          max_active_min: maxActive,
+        }),
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Couldn't swap that one.");
+      setResult((r) => {
+        if (!r) return r;
+        const dishes = [...r.dishes];
+        dishes[i] = json.dish as Extraction;
+        return { ...r, dishes, game_plan: (json.game_plan as GamePlanStep[] | null) ?? r.game_plan };
+      });
+      setSaved((prev) => {
+        const next = [...prev];
+        next[i] = null;
+        return next;
+      });
+      setAddedCount(null);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setError(e instanceof Error ? e.message : "Couldn't swap that one.");
       }
     } finally {
       writeAbort.current = null;
@@ -366,29 +397,7 @@ export default function MakePage() {
         )}
       </div>
 
-      {/* One dish or a whole meal. The scope read also hears it in the words
-          ("a main and a side"), so this is a nudge, not a gate. */}
-      <div className="mt-2 flex gap-2">
-        {[
-          { label: "One dish", value: false },
-          { label: "Whole meal", value: true },
-        ].map((o) => {
-          const active = meal === o.value;
-          return (
-            <button
-              key={o.label}
-              onClick={() => setMeal(o.value)}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${
-                active ? "bg-char text-tile" : "bg-char/5 text-smoke"
-              }`}
-            >
-              {o.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="no-scrollbar -mx-4 mt-1.5 flex gap-2 overflow-x-auto px-4 pb-1">
+      <div className="no-scrollbar -mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1">
         {TIMES.map((t) => {
           const active = maxActive === t.max;
           return (
@@ -417,9 +426,7 @@ export default function MakePage() {
           ? "Reading that…"
           : sameQuestion
             ? "Write another version"
-            : meal
-              ? "Make the meal"
-              : "Make it"}
+            : "Make it"}
       </motion.button>
       {error && <p className="mt-2 text-sm text-flame">{error}</p>}
 
@@ -495,66 +502,20 @@ export default function MakePage() {
               {yieldLabel ?? `Serves ${result.servings}`}
             </p>
 
-            <ul className="mt-2 space-y-2">
-              {result.dishes.map((d, i) => (
-                <motion.li
-                  key={`${d.title}-${i}`}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ ...springSoft, delay: i * 0.04 }}
-                >
-                  <button
-                    onClick={() => setSheet(i)}
-                    className="w-full rounded-[14px] border border-char/10 bg-surface p-3 text-left"
-                  >
-                    <span className="flex items-baseline gap-2">
-                      <span className="min-w-0 flex-1 font-display text-[15px] font-bold">{d.title}</span>
-                      {isMeal && MEAL_ROLE[d.course] && (
-                        <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-smoke">
-                          {MEAL_ROLE[d.course]}
-                        </span>
-                      )}
-                    </span>
-                    {/* No `block` here: line-clamp needs its own display value
-                        to cut the text off at two lines. */}
-                    {d.description && (
-                      <span className="mt-0.5 line-clamp-2 text-xs text-smoke">{d.description}</span>
-                    )}
-                    <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-                      {d.time_active_min != null && (
-                        <span className="text-smoke">
-                          {formatMinutes(d.time_active_min)} active
-                          {d.time_total_min != null &&
-                            d.time_total_min !== d.time_active_min &&
-                            ` · ${formatMinutes(d.time_total_min)} total`}
-                        </span>
-                      )}
-                      <span className={`ml-auto font-semibold ${saved[i] ? "text-herb" : "text-smoke"}`}>
-                        {saved[i] ? "✓ Saved" : "Not saved yet"}
-                      </span>
-                    </span>
-                  </button>
-                </motion.li>
-              ))}
-            </ul>
+            <div className="mt-2">
+              <MealDishList
+                dishes={result.dishes}
+                status={result.dishes.map((_, i) => !!saved[i])}
+                onOpen={setSheet}
+                // Swapping is a meal thing — a single dish has "Write another
+                // version" on the button above instead.
+                onSwap={isMeal ? swap : undefined}
+              />
+            </div>
 
             {result.game_plan && (
-              <div className="mt-4 rounded-xl border border-char/10 bg-surface p-4">
-                <p className="font-display text-sm font-bold">Game plan</p>
-                <ol className="mt-2 space-y-2 text-sm">
-                  {result.game_plan.map((step, i) => {
-                    const [timing, rest] = splitTiming(step);
-                    return (
-                      <li key={i} className="flex gap-2.5">
-                        <span className="mt-px font-display font-bold text-flame">{i + 1}</span>
-                        <span>
-                          {timing && <span className="font-semibold">{timing} </span>}
-                          {rest}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
+              <div className="mt-4">
+                <GamePlan steps={result.game_plan} serveTime={serveTime} onServeTimeChange={setServeTime} />
               </div>
             )}
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { COURSES, GROCERY_SECTIONS } from "./config";
+import { normalizeGamePlan } from "./gamePlan";
 
 export const IngredientSchema = z.object({
   raw: z.string(),
@@ -147,12 +148,28 @@ export const MakeScopeSchema = z.object({
 });
 export type MakeScope = z.infer<typeof MakeScopeSchema>;
 
+/**
+ * A meal's game plan. Structured steps, but plain "2 hours before: …" strings
+ * are accepted too and normalized, so a slip in format costs nothing.
+ */
+const GamePlanSchema = z
+  .array(z.unknown())
+  .nullable()
+  .default(null)
+  .transform((v) => normalizeGamePlan(v));
+
 /** Make, step two: one recipe, or a meal's recipes plus the order to cook them. */
 export const MakeRecipeSchema = z.object({
   dishes: z.array(ExtractionSchema).min(1).max(4),
-  game_plan: z.array(z.string()).nullable().default(null),
+  game_plan: GamePlanSchema,
 });
 export type MakeResult = z.infer<typeof MakeRecipeSchema>;
+
+/** Swapping one dish of a meal: the new dish and the plan rewritten around it. */
+export const MakeSwapSchema = z.object({
+  dish: ExtractionSchema,
+  game_plan: GamePlanSchema,
+});
 
 export const SubstituteSchema = z.object({
   suggestions: z

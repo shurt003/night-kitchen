@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     userId,
     model: MODELS.fast,
     system: MAKE_SCOPE_SYSTEM,
-    content: JSON.stringify({ request, whole_meal: !!body.whole_meal }),
+    content: JSON.stringify({ request }),
     schema: MakeScopeSchema,
     maxTokens: 600,
   });

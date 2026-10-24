@@ -109,9 +109,10 @@ New prompts:
 - Both: `currentUserId` check, `maxDuration` 120, usage logged via `askJson`
   with features `make_scope` / `make_recipe`.
 
-## No migration needed
+## Migrations
 
-`tags`, `source_name` and `servings` already exist. "make" is just a tag.
+Phases 1–2 needed none (`tags`, `source_name` and `servings` already exist;
+"make" is just a tag). Phase 2.5b adds `011_saved_meals.sql`.
 
 ## Phases and gates
 
@@ -169,6 +170,76 @@ rule).
     plus a game plan, and "Add all" creates no duplicate grocery items.
   - Save one; find it in the Library tagged as generated.
   - Wing it still works exactly the same.
+
+### Phase 2.5: Meals that stay together (owner's request, 2026-10-24)
+
+Today "Save all" saves each dish as its own recipe and the game plan lives
+only in the Make page's 12-hour session, so it's lost. The owner wants a full
+meal kept together, viewable like the Make page, plus two extras. Decisions:
+
+- The course pill **"Meals" is relabelled "Mains"** (label only; the stored
+  value stays `meals`).
+- **A "Meals" toggle pill** in the Library filter row (after "All"). Off by
+  default: the Library looks as it does today, with every dish its own tile.
+  On: only saved full meals.
+- **"What time is dinner?"** is optional, offered once a meal is written. It
+  turns the game plan's relative timings into clock times.
+- **Swap one dish** ("give me a different side") rewrites that dish and the
+  game plan.
+
+#### 2.5a: Structured game plan, dinner time, swap a dish (no migration)
+- [x] `MAKE_RECIPE_SYSTEM` returns `game_plan` as
+      `[{ offset_min, label, text }]`, where `offset_min` is minutes before
+      serving (null for "to serve"). Old string plans in a stored session
+      still render (parsed, or shown as-is).
+- [x] "What time is dinner?" under the game plan: a native time picker. Set:
+      each step shows its clock time ("3:00 pm") in place of "4 hours
+      before". Clear it to go back. Pure client math, no model call.
+- [x] "Swap" on each dish of a meal: an optional hint ("something lighter",
+      "no oven", free text) → `POST /api/make/swap` rewrites that one dish
+      in light of the others and returns a fresh game plan. A swapped dish is
+      a new draft; if the old one was already saved it stays in the Library
+      (nothing is deleted on a swap).
+- Built 2026-10-24. Steps a day or more ahead keep their words ("The day
+  before") rather than a false clock time. Live test: dinner for 6 came back
+  structured (300 min = "5 hours before"); swapping the mashed potatoes with
+  "something lighter" gave a fennel and arugula salad in 32s, with a plan that
+  no longer mentions potatoes. `GamePlan` and `MealDishList` are components so
+  the saved-meal sheet in 2.5b reuses them.
+- **Phone checklist:** make a meal; set dinner for 7:00 and check the times
+  read right (and that a step "4 hours before" says 3:00 pm); clear it; swap
+  the side with "something lighter" and check the game plan mentions the new
+  side and not the old one.
+
+#### 2.5b: Saved meals in the Library (migration `011_saved_meals.sql`)
+- [ ] **Migration first:** the owner runs `011_saved_meals.sql` in Supabase
+      before any code that reads it is pushed. It adds `saved_meals` (title,
+      request, servings, game plan, serve_time) and `saved_meal_dishes`
+      (ordered recipe ids; deleting a recipe drops it from its meal).
+- [ ] "Save all" on a meal also saves the meal. Re-saving after a swap
+      updates the same meal rather than creating a second.
+- [ ] Library: "Mains" relabel; "Meals" toggle pill showing meal cards only.
+      The meal card shows the title, dish names, "3 dishes · serves 6", and
+      the main's photo once it has one.
+- [ ] Meal sheet: same layout as the Make results (game plan with dinner
+      time, dish cards → normal recipe sheet), plus "Add everything to
+      grocery list" and "Swap" on each dish.
+- [ ] A recipe that belongs to a meal shows "Part of: <meal>" linking back.
+- [ ] Deleting a meal opens a **confirmation sheet that animates up** (the
+      owner's call; the one place a confirm is used instead of only an undo,
+      because the choice matters) with two options: **"Delete the meal, keep
+      the recipes"** and **"Delete the meal and its N recipes"**, plus Cancel.
+      Either one then shows the usual undo toast. Deletion is **deferred**,
+      like the Library's recipe delete: everything is hidden at once but
+      nothing is removed server-side until the toast's window closes, so undo
+      is lossless (recipes, photos, cook logs). If the app is closed inside
+      the window, nothing is deleted (the safe direction).
+- **Phone checklist:** save a meal; toggle Meals on in the Library and open
+  it; the game plan and dinner time are there; open a dish and follow its
+  "Part of" link back; delete the meal choosing "keep the recipes" and check
+  the three recipes are still there, then undo; delete it again choosing
+  "and its recipes", check all are gone, then undo and check everything is
+  back, photos included.
 
 ### Phase 3: Polish
 - [ ] Loading copy and motion consistent with Wing it; Stop/cancel on long

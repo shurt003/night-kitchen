@@ -214,7 +214,7 @@ Respond with ONLY JSON:
  */
 export const MAKE_SCOPE_SYSTEM = `Someone has said what they want to cook. Before anything is written, work out its shape. You are not writing a recipe.
 
-You are given "request" (their words) and "whole_meal" (true if they tapped "Whole meal" — a strong hint, but their words win if they clearly ask for one dish).
+You are given "request" — their words, which say whether this is one dish or a meal.
 
 Decide:
 - "kind": "meal" when they want several dishes that go together (a main and a side, "dinner", a menu, a dessert alongside), otherwise "dish".
@@ -232,20 +232,9 @@ Respond with ONLY JSON:
   "not_food": false
 }`;
 
-/**
- * Make, step two: the recipe — or a whole meal and the order to cook it in.
- * Shopping is allowed here (unlike Wing it), so staples are a resource rather
- * than a fence.
- */
-export const MAKE_RECIPE_SYSTEM = `You write recipes for exactly what someone asked to cook. Shopping is fine — they'll buy whatever they don't have.
-
-You are given "request" (their words), "kind" ("dish" or "meal"), "dishes" (what to write, in serving order), "servings" (how many to cook for), "yield_label" (a batch size, when the dish has one), an optional "max_active_min", and "staples" (things they always keep in).
-
-Rules:
-- Write what they asked for. If they named a known dish, write an excellent, faithful version of it — not a twist — unless they asked for a twist. Write it in your own words; never reproduce a published recipe's text.
-- Quantities for "servings", and set each dish's "servings" to that number. When "yield_label" is given, write for that batch instead and say it in the description ("Makes one 9×13 pan, about 16 brownies").
+/** How each Make dish is written — shared by the first write and a swap. */
+const MAKE_DISH_RULES = `- Quantities for "servings", and set each dish's "servings" to that number. When "yield_label" is given, write for that batch instead and say it in the description ("Makes one 9×13 pan, about 16 brownies").
 - Use their staples where they genuinely fit — that's what they keep in for — but call for anything the dish needs. Don't bend a dish out of shape to avoid a shop.
-- A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then "game_plan": 4–8 short steps that sequence the whole cook so everything is ready together, each starting with its timing relative to eating ("2 hours before: …", "15 min before: …", "To serve: …"). For a single dish, "game_plan" is null.
 - If "max_active_min" is set, keep hands-on time inside it — for a meal, the cook's total hands-on time across all dishes. Unattended time doesn't count.
 - Be honest about "time_total_min" and "time_active_min".
 - Ingredients: "raw" is the full line as a person would read it ("2 tbsp soy sauce"); the other fields break that same line apart. Use "section" only when the recipe genuinely has parts ("For the sauce").
@@ -253,14 +242,18 @@ Rules:
 - Steps carry real technique — heat level, what it should look like, what to listen for.
 - "timer_seconds" only where a step is genuinely timed and unattended. Null everywhere else.
 - "course" is "meals" (a main), "appetizers", "sides", "desserts", "drinks", or "misc".
-- Nobody has cooked this yet. Put anything you're unsure about in "gaps" — a time that depends on their oven, a substitution you're guessing at.
+- Nobody has cooked this yet. Put anything you're unsure about in "gaps" — a time that depends on their oven, a substitution you're guessing at.`;
 
-${MAKE_PRINCIPLES}
+/**
+ * The game plan is structured so the page can turn "4 hours before" into
+ * "3:00 pm" itself once the cook says when dinner is — no second call.
+ */
+const MAKE_GAME_PLAN_RULES = `"game_plan": 4–8 steps that sequence the whole cook so everything is ready together, in the order they happen. Each step is { "offset_min", "label", "text" }:
+- "offset_min": minutes before eating that the step starts (240 for four hours before, 15 for fifteen minutes before). Null only for the final "To serve" step. A step the day before is 1440 or more.
+- "label": the same timing in words — "4 hours before", "15 min before", "The day before", "To serve".
+- "text": what to do, without repeating the timing.`;
 
-Respond with ONLY JSON:
-{
-  "dishes": [
-    {
+const MAKE_DISH_JSON = `{
       "title": "...",
       "description": "a sentence or two on what it is",
       "ingredients": [
@@ -281,7 +274,62 @@ Respond with ONLY JSON:
       "source_name": "Night Kitchen",
       "confidence": 0.8,
       "gaps": []
-    }
+    }`;
+
+const MAKE_GAME_PLAN_JSON = `[
+    { "offset_min": 240, "label": "4 hours before", "text": "Sear the ribs, build the braise, and get the pot into a 325°F oven." },
+    { "offset_min": null, "label": "To serve", "text": "Spoon the polenta onto plates and top with the ribs." }
+  ]`;
+
+/**
+ * Make, step two: the recipe — or a whole meal and the order to cook it in.
+ * Shopping is allowed here (unlike Wing it), so staples are a resource rather
+ * than a fence.
+ */
+export const MAKE_RECIPE_SYSTEM = `You write recipes for exactly what someone asked to cook. Shopping is fine — they'll buy whatever they don't have.
+
+You are given "request" (their words), "kind" ("dish" or "meal"), "dishes" (what to write, in serving order), "servings" (how many to cook for), "yield_label" (a batch size, when the dish has one), an optional "max_active_min", and "staples" (things they always keep in).
+
+Rules:
+- Write what they asked for. If they named a known dish, write an excellent, faithful version of it — not a twist — unless they asked for a twist. Write it in your own words; never reproduce a published recipe's text.
+- A meal: write every dish in "dishes", in that order, so they eat well together — flavours that complement rather than repeat, and oven and hob demands that can actually share a kitchen. Then write the game plan (below). For a single dish, "game_plan" is null.
+${MAKE_DISH_RULES}
+
+For a meal, ${MAKE_GAME_PLAN_RULES}
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON:
+{
+  "dishes": [
+    ${MAKE_DISH_JSON}
   ],
-  "game_plan": null
+  "game_plan": ${MAKE_GAME_PLAN_JSON}
+}
+
+("game_plan" is null for a single dish.)`;
+
+/**
+ * Make, swapping one dish of a meal: a different dish in the same slot that
+ * still suits the rest of the meal, and a game plan rewritten around it.
+ */
+export const MAKE_SWAP_SYSTEM = `You're replacing one dish in a meal someone is planning to cook. Shopping is fine — they'll buy whatever they don't have.
+
+You are given "request" (what they originally asked for), "meal" (every dish in serving order — title, course, description, timings and steps), "replace" (the index in "meal" of the dish to swap out), "hint" (what they'd like instead — may be empty), "servings", an optional "max_active_min", and "staples".
+
+Rules:
+- Write one new dish for the same place in the meal (same course) — genuinely different from the one it replaces, not a variation of it.
+- Follow the hint when there is one ("something lighter", "no oven", a specific dish). With no hint, pick whatever suits the rest of the meal best.
+- It must eat well with the other dishes — complementing them rather than repeating their flavours — and share the kitchen with them (oven temperatures, hob space, timing).
+- Leave the other dishes exactly as they are. Then rewrite the whole meal's game plan so it reflects the new dish and never mentions the old one.
+${MAKE_DISH_RULES}
+
+The ${MAKE_GAME_PLAN_RULES}
+
+${MAKE_PRINCIPLES}
+
+Respond with ONLY JSON:
+{
+  "dish": ${MAKE_DISH_JSON},
+  "game_plan": ${MAKE_GAME_PLAN_JSON}
 }`;
