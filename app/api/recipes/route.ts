@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { currentUserId } from "@/lib/auth";
+import { weekRecipeIds } from "@/lib/savedMeals";
 
 /**
  * GET /api/recipes
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
   if (p.get("max_active")) query = query.lte("time_active_min", Number(p.get("max_active")));
   if (p.get("max_effort")) query = query.lte("effort", Number(p.get("max_effort")));
 
-  const { data, error } = await query.limit(500);
+  const [{ data, error }, inWeeks] = await Promise.all([query.limit(500), weekRecipeIds(userId)]);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   type Row = {
@@ -35,7 +36,8 @@ export async function GET(req: Request) {
     cook_log?: { cooked_on: string }[];
     [key: string]: unknown;
   };
-  const rows = ((data ?? []) as Row[]).map((r) => {
+  // A saved week's recipes are found inside the week (Meals), not here.
+  const rows = ((data ?? []) as Row[]).filter((r) => !inWeeks.has(r.id as string)).map((r) => {
     const cooks = r.cook_log ?? [];
     const lastCooked = cooks.length
       ? cooks.map((c: { cooked_on: string }) => c.cooked_on).sort().at(-1)!

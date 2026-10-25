@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { weekRecipeIds } from "./savedMeals";
 
 /**
  * The compact index sent to planning/pantry/chat features.
@@ -25,15 +26,21 @@ export async function buildRecipeIndex(
   opts: { includeNotes?: boolean } = {}
 ): Promise<RecipeIndexEntry[]> {
   const supabase = db();
-  const { data } = await supabase
-    .from("recipes")
-    .select(
-      "id, title, tags, main_ingredients, time_active_min, hearts, effort, status, cuisine, notes, cook_log(cooked_on)"
-    )
-    .eq("user_id", userId)
-    .eq("capture_status", "ready")
-    .neq("status", "retired")
-    .limit(500);
+  const [{ data: all }, inWeeks] = await Promise.all([
+    supabase
+      .from("recipes")
+      .select(
+        "id, title, tags, main_ingredients, time_active_min, hearts, effort, status, cuisine, notes, cook_log(cooked_on)"
+      )
+      .eq("user_id", userId)
+      .eq("capture_status", "ready")
+      .neq("status", "retired")
+      .limit(500),
+    weekRecipeIds(userId),
+  ]);
+  // A saved week's recipes stay inside the week — not offered by the planner
+  // or Wing it's library search.
+  const data = (all ?? []).filter((r) => !inWeeks.has(r.id));
 
   type Row = {
     id: string;

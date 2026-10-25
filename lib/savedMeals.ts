@@ -155,3 +155,21 @@ export async function mealsForRecipe(userId: string, recipeId: string): Promise<
   }
   return [...seen].map(([id, title]) => ({ id, title }));
 }
+
+/**
+ * Recipes that belong to a saved week (Plan the week). They live only inside
+ * that week under the Library's Meals toggle — not as Library tiles, not in
+ * the planner's picker, not in Wing it's library search — so a week of prep
+ * doesn't flood the library. A single meal's dishes stay ordinary recipes.
+ * Recipes kept after their week is deleted come back into the library.
+ */
+export async function weekRecipeIds(userId: string): Promise<Set<string>> {
+  const { data, error } = await db()
+    .from("saved_meal_dishes")
+    .select("recipe_id, saved_meals!inner(user_id, kind)")
+    .eq("saved_meals.user_id", userId)
+    .eq("saved_meals.kind", "nights");
+  // Hiding is a convenience: if this can't be read, show everything rather than fail.
+  if (error || !data) return new Set();
+  return new Set((data as { recipe_id: string }[]).map((r) => r.recipe_id));
+}
